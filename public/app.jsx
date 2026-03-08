@@ -24,22 +24,16 @@ function useIUCN(sciName) {
   useEffect(() => {
     if (!sciName) return;
     setState({ data: null, loading: true, error: null });
-    // v4 API requires genus_name + species_name as separate params, auth via Bearer header (handled by edge function)
-    const parts = sciName.trim().split(/\s+/);
-    const genus = parts[0];
-    const species = parts.slice(1).join(" ");
-    if (!genus || !species) {
-      setState({ data: null, loading: false, error: "Could not parse name" });
-      return;
-    }
-    fetch(`/api/iucn/taxa/scientific_name?genus_name=${encodeURIComponent(genus)}&species_name=${encodeURIComponent(species)}`)
+
+    // v4 endpoint: /api/v4/taxa/scientific_name/{Genus species}
+    // scientific name goes in the URL path (URL-encoded)
+    const encoded = encodeURIComponent(sciName.trim());
+    fetch(`/api/iucn/taxa/scientific_name/${encoded}`)
       .then(r => r.json())
       .then(d => {
-        // v4 returns taxon even when assessments=[] for some species
         if (d?.taxon) {
           setState({ data: d, loading: false, error: null });
         } else if (d?.error) {
-          // Show the exact URL tried so we can debug routing issues
           const detail = d.tried ? ` (tried: ${d.tried})` : (d.detail ? `: ${d.detail}` : "");
           setState({ data: null, loading: false, error: (d.error || "API error") + detail });
         } else {
@@ -50,6 +44,7 @@ function useIUCN(sciName) {
   }, [sciName]);
   return state;
 }
+
 
 function useINaturalist(sciName) {
   const [state, setState] = useState({ photos: [], loading: false });
