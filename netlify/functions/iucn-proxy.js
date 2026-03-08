@@ -1,28 +1,47 @@
 /**
  * netlify/functions/iucn-proxy.js
  *
- * Regular Netlify Function (Node.js) — has full outbound network access.
- * Proxies IUCN Red List API v4 so your key stays secret on the server.
+ * Proxies requests to the IUCN Red List API v4.
+ * The app calls: /api/iucn/taxa/scientific_name?genus_name=X&species_name=Y
+ * netlify.toml rewrites that to: /.netlify/functions/iucn-proxy/taxa/scientific_name?...
+ * This function forwards to: https://apiv4.iucnredlist.org/api/v4/taxa/scientific_name?...
  *
- * Called by the app as: /api/iucn/taxa/scientific_name?genus_name=X&species_name=Y
- * Netlify routes /api/iucn/* → /.netlify/functions/iucn-proxy via netlify.toml redirect.
- *
- * SETUP (only needed once):
- *   Netlify dashboard → Site Settings → Environment Variables → Add:
- *   Key:   IUCN_API_KEY
- *   Value: yh6HAHLo93MGNoFBxP3GmsG9C82V7bfaJ2Jn
- *   Then: Deploys → Trigger deploy
+ * SETUP: Netlify dashboard → Site Settings → Environment Variables
+ *   IUCN_API_KEY = yh6HAHLo93MGNoFBxP3GmsG9C82V7bfaJ2Jn
  */
 
 const https = require("https");
+const urlLib = require("url");
 
-exports.handler = async function (event) {
-  const CORS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  };
+const CORS = {
+  "Access-Control-Allow-Origin":  "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
 
+function httpsGet(fullUrl, reqHeaders) {
+  return new Promise((resolve, reject) => {
+    const parsed = urlLib.parse(fullUrl);
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        path:     parsed.path,
+        method:   "GET",
+        headers:  reqHeaders,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", chunk => { data += chunk; });
+        res.on("end",  () => resolve({ status: res.statusCode, body: data }));
+      }
+    );
+    req.on("error", reject);
+    req.setTimeout(15000, () => { req.destroy(new Error("Timed out after 15s")); });
+    req.end();
+  });
+}
+
+exports.handler = async function(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: CORS, body: "" };
   }
@@ -36,48 +55,42 @@ exports.handler = async function (event) {
     };
   }
 
-  // Strip the routing prefix to get the real IUCN path + query
-  // e.g. /api/iucn/taxa/scientific_name?genus_name=Panthera&species_name=leo
-  //   → /taxa/scientific_name?genus_name=Panthera&species_name=leo
-  const iucnPath = event.path.replace(/^\/.netlify\/functions\/iucn-proxy/, "").replace(/^\/api\/iucn/, "") || "/";
-  const qs = event.rawQuery ? `?${event.rawQuery}` : "";
-  const iucnUrl = `https://apiv4.iucnredlist.org/api/v4${iucnPath}${qs}`;
+  // Strip the Netlify function prefix to get just the IUCN API path
+  // event.path = /.netlify/functions/iucn-proxy/taxa/scientific_name
+  const fnPrefix = "/.netlify/functions/iucn-proxy";
+  const iucnPath = event.path.startsWith(fnPrefix)
+    ? event.path.slice(fnPrefix.length) || "/"
+    : event.path.replace(/^\/api\/iucn/, "") || "/";
 
+  const qs = event.rawQuery ? "?" + event.rawQuery : "";
+  const iucnUrl = "https://apiv4.iucnredlist.org/api/v4" + iucnPath + qs;
+
+  let result;
   try {
-    const body = await new Promise((resolve, reject) => {
-      const req = https.request(
-        iucnUrl,
-        {
-          method: "GET",
-          headers: {
-            "Accept": "application/json",
-            "Authorization": `Bearer ${IUCN_KEY}`,
-          },
-        },
-        (res) => {
-          let data = "";
-          res.on("data", chunk => { data += chunk; });
-          res.on("end", () => resolve({ status: res.statusCode, body: data }));
-        }
-      );
-      req.on("error", reject);
-      req.end();
+    result = await httpsGet(iucnUrl, {
+      "Accept":        "application/json",
+      "Authorization": "Bearer " + IUCN_KEY,
+      "User-Agent":    "MammalTreeOfLife/1.0",
     });
-
-    return {
-      statusCode: body.status,
-      headers: {
-        ...CORS,
-        "Content-Type": "application/json",
-        ...(body.status === 200 ? { "Cache-Control": "public, max-age=86400" } : {}),
-      },
-      body: body.body,
-    };
   } catch (err) {
     return {
       statusCode: 502,
       headers: { ...CORS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Failed to reach IUCN API", detail: err.message }),
+      body: JSON.stringify({
+        error:  "Failed to reach IUCN API",
+        detail: err.message,
+        tried:  iucnUrl,
+      }),
     };
   }
+
+  return {
+    statusCode: result.status,
+    headers: {
+      ...CORS,
+      "Content-Type": "application/json",
+      ...(result.status === 200 ? { "Cache-Control": "public, max-age=86400" } : {}),
+    },
+    body: result.body,
+  };
 };
