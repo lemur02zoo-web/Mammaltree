@@ -1,0 +1,16 @@
+[build]
+  publish = "public"
+
+[[edge_functions]]
+  path = "/api/iucn/*"
+  function = "iucn-proxy"
+
+[[headers]]
+  for = "/mdd_full.json"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
