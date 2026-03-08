@@ -24,9 +24,22 @@ function useIUCN(sciName) {
   useEffect(() => {
     if (!sciName) return;
     setState({ data: null, loading: true, error: null });
-    fetch(`/api/iucn/taxa/scientific_name?name=${encodeURIComponent(sciName)}`)
+    // v4 API requires genus_name + species_name as separate params, auth via Bearer header (handled by edge function)
+    const parts = sciName.trim().split(/\s+/);
+    const genus = parts[0];
+    const species = parts.slice(1).join(" ");
+    if (!genus || !species) {
+      setState({ data: null, loading: false, error: "Could not parse name" });
+      return;
+    }
+    fetch(`/api/iucn/taxa/scientific_name?genus_name=${encodeURIComponent(genus)}&species_name=${encodeURIComponent(species)}`)
       .then(r => r.json())
-      .then(d => setState({ data: d?.taxon ? d : null, loading: false, error: d?.taxon ? null : "Not found in IUCN" }))
+      .then(d => {
+        // v4 returns taxon even when assessments=[] for some species
+        if (d?.taxon) setState({ data: d, loading: false, error: null });
+        else if (d?.errors || d?.error) setState({ data: null, loading: false, error: d.errors || d.error });
+        else setState({ data: null, loading: false, error: "Not found in IUCN Red List" });
+      })
       .catch(e => setState({ data: null, loading: false, error: e.message }));
   }, [sciName]);
   return state;
@@ -128,7 +141,10 @@ function IUCNPanel({ sciName }) {
   if (!data) return null;
 
   const taxon = data.taxon || {};
-  const a = data.assessments?.[0] || {};
+  // assessments is an array; first entry is the latest
+  const a = (data.assessments && data.assessments.length > 0) ? data.assessments[0] : null;
+  const noAssessment = !a;
+
   const Row = ({ label, value }) => value ? (
     <div style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: "1px solid #0f172a", fontSize: 13 }}>
       <div style={{ color: "#475569", minWidth: 130, flexShrink: 0 }}>{label}</div>
@@ -136,21 +152,37 @@ function IUCNPanel({ sciName }) {
     </div>
   ) : null;
 
+  // v4 assessment fields: red_list_category.code, population_trend, criteria, url
+  const catCode = a?.red_list_category?.code || a?.category;
+  const trend = a?.population_trend || a?.populationTrend;
+  const criteria = a?.criteria || a?.red_list_criteria;
+  const assessUrl = a?.url || (taxon.sis_id ? `https://www.iucnredlist.org/species/${taxon.sis_id}` : null);
+
   return (
     <div>
-      {a.red_list_category && (
-        <div style={{ marginBottom: 14, padding: "12px 14px", background: "#0a1628", borderRadius: 8 }}>
-          <div style={{ fontSize: 10, color: "#334155", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>IUCN Red List Category</div>
-          <Badge status={a.red_list_category?.code} large />
-          {a.year_published && <span style={{ color: "#475569", marginLeft: 8, fontSize: 11 }}>({a.year_published})</span>}
+      {noAssessment ? (
+        <div style={{ fontSize: 12, color: "#475569", padding: "10px 14px", background: "#0a1628", borderRadius: 8, marginBottom: 14 }}>
+          Taxon found in IUCN (ID: {taxon.sis_id}) but no published assessment data available via API.
+          {taxon.sis_id && <> <a href={`https://www.iucnredlist.org/species/${taxon.sis_id}`} target="_blank" rel="noreferrer" style={{ color: "#7dd3fc" }}>View on Red List ↗</a></>}
         </div>
+      ) : (
+        <>
+          {catCode && (
+            <div style={{ marginBottom: 14, padding: "12px 14px", background: "#0a1628", borderRadius: 8 }}>
+              <div style={{ fontSize: 10, color: "#334155", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>IUCN Red List Category</div>
+              <Badge status={catCode} large />
+              {a.year_published && <span style={{ color: "#475569", marginLeft: 8, fontSize: 11 }}>({a.year_published})</span>}
+            </div>
+          )}
+          <Row label="Population trend" value={trend} />
+          <Row label="Criteria" value={criteria} />
+        </>
       )}
-      <Row label="Population trend" value={a.population_trend} />
-      <Row label="Criteria" value={a.red_list_criteria} />
       {taxon.class_name && <Row label="Classification" value={[taxon.class_name, taxon.order_name, taxon.family_name].filter(Boolean).join(" › ")} />}
-      {a.url && <a href={a.url} target="_blank" rel="noreferrer"
+      {taxon.common_names?.length > 0 && <Row label="Common names" value={taxon.common_names.filter(n => n.language === "eng").map(n => n.name).join(", ")} />}
+      {assessUrl && <a href={assessUrl} target="_blank" rel="noreferrer"
         style={{ display: "inline-block", marginTop: 12, color: "#7dd3fc", fontSize: 12, textDecoration: "none" }}>
-        Full IUCN assessment ↗
+        View on IUCN Red List ↗
       </a>}
     </div>
   );
