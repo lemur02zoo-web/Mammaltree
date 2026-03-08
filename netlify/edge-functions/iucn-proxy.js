@@ -31,12 +31,16 @@ export default async function handler(request, context) {
   const iucnPath = url.pathname.replace(/^\/api\/iucn/, "");
   const iucnUrl = new URL(`https://apiv4.iucnredlist.org/api/v4${iucnPath}`);
 
+  // Forward all query params from the app (genus_name, species_name, etc.)
+  // but do NOT add the key as a query param — v4 uses Bearer token in header
   url.searchParams.forEach((value, key) => iucnUrl.searchParams.set(key, value));
-  iucnUrl.searchParams.set("token", IUCN_KEY);
 
   try {
     const resp = await fetch(iucnUrl.toString(), {
-      headers: { "Accept": "application/json" },
+      headers: {
+        "Accept": "application/json",
+        "Authorization": `Bearer ${IUCN_KEY}`,
+      },
     });
     const body = await resp.text();
     return new Response(body, {
