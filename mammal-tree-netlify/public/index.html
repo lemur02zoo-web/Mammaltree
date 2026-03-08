@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mammal Tree of Life</title>
+  <meta name="description" content="Interactive Tree of Life for all 6,871 mammal species — with IUCN Red List status and iNaturalist CC0 photos." />
+  <meta property="og:title" content="Mammal Tree of Life" />
+  <meta property="og:description" content="Explore all known mammal species with conservation status and photos." />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #040d1a; }
+    #root { height: 100%; }
+    /* Loading spinner shown before React mounts */
+    #loading {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: #040d1a; color: #334155;
+      font-family: 'DM Sans', sans-serif; font-size: 14px; gap: 16px;
+    }
+    #loading .tree { font-size: 48px; animation: pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:0.4} 50%{opacity:1} }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="tree">🌳</div>
+    <div>Loading Mammal Tree of Life…</div>
+  </div>
+  <div id="root"></div>
+
+  <!-- React + Babel (for dev; swap for Vite build in production) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel" src="app.jsx" data-presets="react"></script>
+</body>
+</html>

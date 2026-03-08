@@ -1,0 +1,37 @@
+[build]
+  publish = "public"
+  command = "echo 'No build step needed - static site'"
+
+# ── Edge Function: proxies IUCN API calls so the key stays secret ────────────
+[[edge_functions]]
+  path = "/api/iucn/*"
+  function = "iucn-proxy"
+
+# ── Security & caching headers ────────────────────────────────────────────────
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/mdd_full.json"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"   # cache species data for 1 day
+
+[[headers]]
+  for = "/mdd_enriched.json"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"    # cache enriched data for 1 hour
+
+# ── SPA fallback: all routes → index.html ────────────────────────────────────
+[[redirects]]
+  from = "/species/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
