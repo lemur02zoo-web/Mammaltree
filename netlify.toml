@@ -9,12 +9,7 @@
   [headers.values]
     Cache-Control = "public, max-age=86400"
 
-[[redirects]]
-  from = "/api/iucn/*"
-  to = "/.netlify/functions/iucn-proxy/:splat"
-  status = 200
-  force = true
-
+# SPA fallback — must be last
 [[redirects]]
   from = "/*"
   to = "/index.html"
