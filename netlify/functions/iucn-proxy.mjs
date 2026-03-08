@@ -65,4 +65,4 @@ export default async (req, context) => {
   }
 };
 
-export const config = { path: ["/api/iucn/*", "/.netlify/functions/iucn-proxy/*"] };
+// Function is called directly at /.netlify/functions/iucn-proxy/*
