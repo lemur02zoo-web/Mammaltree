@@ -36,9 +36,15 @@ function useIUCN(sciName) {
       .then(r => r.json())
       .then(d => {
         // v4 returns taxon even when assessments=[] for some species
-        if (d?.taxon) setState({ data: d, loading: false, error: null });
-        else if (d?.errors || d?.error) setState({ data: null, loading: false, error: d.errors || d.error });
-        else setState({ data: null, loading: false, error: "Not found in IUCN Red List" });
+        if (d?.taxon) {
+          setState({ data: d, loading: false, error: null });
+        } else if (d?.error) {
+          // Show the exact URL tried so we can debug routing issues
+          const detail = d.tried ? ` (tried: ${d.tried})` : (d.detail ? `: ${d.detail}` : "");
+          setState({ data: null, loading: false, error: (d.error || "API error") + detail });
+        } else {
+          setState({ data: null, loading: false, error: "Not found in IUCN Red List" });
+        }
       })
       .catch(e => setState({ data: null, loading: false, error: e.message }));
   }, [sciName]);
