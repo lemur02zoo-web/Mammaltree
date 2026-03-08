@@ -28,7 +28,7 @@ function useIUCN(sciName) {
     // v4 endpoint: /api/v4/taxa/scientific_name/{Genus species}
     // scientific name goes in the URL path (URL-encoded)
     const encoded = encodeURIComponent(sciName.trim());
-    fetch(`/api/iucn/taxa/scientific_name/${encoded}`)
+    fetch(`/.netlify/functions/iucn-proxy/taxa/scientific_name/${encoded}`)
       .then(r => r.json())
       .then(d => {
         if (d?.taxon) {
