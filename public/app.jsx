@@ -21,7 +21,7 @@ const sc = s => (SM[s] || SM.NE).c;
 // ── IUCN live lookup via Cloudflare Worker proxy ─────────────────────────
 // Set this to your Worker URL after deploying cloudflare-worker/iucn-proxy.js
 // e.g. "https://iucn-proxy.YOUR-SUBDOMAIN.workers.dev"
-const IUCN_PROXY = "https://iucn-proxy.lemur02zoo.workers.dev";
+const IUCN_PROXY = "https://iucn-proxy.YOUR-SUBDOMAIN.workers.dev";
 
 // Per-session cache so we don't re-fetch the same species twice
 const iucnCache = {};
@@ -43,7 +43,11 @@ function useIUCN(sciName) {
     const encoded = encodeURIComponent(sciName.trim());
 
     // Step 1: get taxon + assessment list
-    fetch(`${IUCN_PROXY}/taxa/scientific_name/${encoded}`)
+    // API uses query params: ?genus_name=X&species_name=Y[&infra_name=Z]
+    const parts = sciName.trim().split(" ");
+    const params = new URLSearchParams({ genus_name: parts[0], species_name: parts[1] || "" });
+    if (parts[2]) params.set("infra_name", parts[2]);  // subspecies
+    fetch(`${IUCN_PROXY}/taxa/scientific_name?${params}`)
       .then(r => r.json())
       .then(async taxa => {
         if (!taxa?.taxon) {
