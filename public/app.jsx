@@ -82,11 +82,8 @@ function InfoRow({ label, value, mono }) {
   );
 }
 
-function PhotoGallery({ sciName }) {
-  const { photos, loading } = useINat(sciName);
+function PhotoGalleryRaw({ photos, sciName }) {
   const [idx, setIdx] = useState(0);
-  if (loading) return <div style={{ textAlign:"center", padding:32, color:"#475569" }}><div style={{ fontSize:32 }}>📸</div><div style={{ fontSize:12, marginTop:8 }}>Loading CC0 photos…</div></div>;
-  if (!photos.length) return <div style={{ textAlign:"center", padding:32, color:"#334155", fontSize:13 }}>No CC0 photos found on iNaturalist.</div>;
   const p = photos[idx];
   return (
     <div>
@@ -103,6 +100,13 @@ function PhotoGallery({ sciName }) {
       )}
     </div>
   );
+}
+
+function PhotoGallery({ sciName }) {
+  const { photos, loading } = useINat(sciName);
+  if (loading) return <div style={{ textAlign:"center", padding:32, color:"#475569" }}><div style={{ fontSize:32 }}>📸</div><div style={{ fontSize:12, marginTop:8 }}>Loading CC0 photos…</div></div>;
+  if (!photos.length) return <div style={{ textAlign:"center", padding:32, color:"#334155", fontSize:13 }}>No CC0 photos found on iNaturalist.</div>;
+  return <PhotoGalleryRaw photos={photos} sciName={sciName}/>;
 }
 
 function IUCNPanel({ sciName }) {
@@ -208,22 +212,26 @@ function MDDPanel({ sp }) {
   );
 }
 
-function SubspeciesPanel({ sp }) {
+function SubspeciesPanel({ sp, onSelectSsp }) {
+  const [hov, setHov] = useState(null);
   if (!sp.ssp||sp.ssp.length===0) return <div style={{ textAlign:"center", padding:32, color:"#334155", fontSize:13 }}>No subspecies recorded in MDD v2.4.</div>;
   return (
     <div>
-      <div style={{ fontSize:11, color:"#334155", marginBottom:12 }}>{sp.ssp.length} subspecies recognised in MDD v2.4</div>
+      <div style={{ fontSize:11, color:"#334155", marginBottom:12 }}>{sp.ssp.length} subspecies recognised in MDD v2.4 · click to view photos</div>
       {sp.ssp.map((name,i)=>(
-        <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", borderRadius:6, marginBottom:3, background:"#07101f" }}>
+        <div key={i} onClick={()=>onSelectSsp({name, parentSp:sp})}
+          onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
+          style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:6, marginBottom:3, background:hov===i?"#0f2040":"#07101f", cursor:"pointer", transition:"background 0.1s" }}>
           <div style={{ width:5, height:5, borderRadius:"50%", background:sc(sp.st), flexShrink:0 }}/>
-          <span style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:13, color:"#e2e8f0" }}>{name}</span>
+          <span style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:13, color:"#e2e8f0", flex:1 }}>{name}</span>
+          <span style={{ fontSize:11, color:"#1e3a5f" }}>📸 →</span>
         </div>
       ))}
     </div>
   );
 }
 
-function SpeciesPanel({ sp, onClose }) {
+function SpeciesPanel({ sp, onClose, onSelectSsp }) {
   const [tab, setTab] = useState("photos");
   const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"],["mdd","📋","MDD"],
     ...(sp.ssp?.length?[["ssp","🔬","Subspecies"]]:[])]
@@ -265,7 +273,7 @@ function SpeciesPanel({ sp, onClose }) {
         {tab==="photos" && <PhotoGallery sciName={sp.sci}/>}
         {tab==="iucn"   && <IUCNPanel   sciName={sp.sci}/>}
         {tab==="mdd"    && <MDDPanel    sp={sp}/>}
-        {tab==="ssp"    && <SubspeciesPanel sp={sp}/>}
+        {tab==="ssp"    && <SubspeciesPanel sp={sp} onSelectSsp={onSelectSsp}/>}
       </div>
       <div style={{ padding:"7px 14px", borderTop:"1px solid #0f172a", fontSize:9, color:"#1e293b", display:"flex", justifyContent:"space-between" }}>
         <span>MDD v2.4 · iNaturalist CC0</span><span>IUCN Red List v4</span>
@@ -274,21 +282,93 @@ function SpeciesPanel({ sp, onClose }) {
   );
 }
 
+
+// ── Subspecies detail panel ────────────────────────────────────────────────
+function SubspeciesDetailPanel({ ssp, onClose, onOpenParent }) {
+  // ssp = { name: "T. a. acanthion", parentSp: {sci, com, st, ...} }
+  const { name, parentSp } = ssp;
+
+  // iNat search uses full trinomial if available, otherwise genus+species+subsp
+  const { photos, loading } = useINat(name);
+
+  return (
+    <div style={{ position:"fixed", right:0, top:0, bottom:0, width:370, background:"#0a1220", borderLeft:"1px solid #0f2040", display:"flex", flexDirection:"column", zIndex:101, boxShadow:"-16px 0 48px #00000099" }}>
+      {/* Header */}
+      <div style={{ padding:"18px 18px 12px", borderBottom:"1px solid #0f172a" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            {/* Breadcrumb back to species */}
+            <div onClick={onOpenParent} style={{ fontSize:11, color:"#1e3a5f", fontFamily:"monospace", marginBottom:6, cursor:"pointer", display:"flex", alignItems:"center", gap:4 }}>
+              <span style={{ fontSize:13 }}>←</span>
+              <span style={{ fontStyle:"italic" }}>{parentSp.sci}</span>
+              <span style={{ color:"#0f2040" }}>· {parentSp.com||""}</span>
+            </div>
+            <div style={{ fontFamily:"'Playfair Display',serif", fontSize:17, fontStyle:"italic", color:"#f1f5f9", lineHeight:1.25, marginBottom:4 }}>{name}</div>
+            <div style={{ fontSize:11, color:"#334155", marginBottom:8 }}>Subspecies of <span style={{ fontStyle:"italic", color:"#64748b" }}>{parentSp.sci}</span></div>
+            <Badge status={parentSp.st}/>
+          </div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:"#475569", fontSize:22, cursor:"pointer", lineHeight:1, padding:2 }}>✕</button>
+        </div>
+        <div style={{ marginTop:8, fontSize:11, color:"#1e3a5f", fontFamily:"monospace" }}>
+          {parentSp.ord} › {parentSp.fam}{parentSp.sfam?` › ${parentSp.sfam}`:""} › <span style={{ fontStyle:"italic" }}>{parentSp.gen}</span>
+        </div>
+      </div>
+
+      {/* Tab label */}
+      <div style={{ padding:"8px 14px 6px", borderBottom:"1px solid #0f172a", display:"flex", alignItems:"center", gap:6 }}>
+        <span style={{ fontSize:14 }}>📸</span>
+        <span style={{ fontSize:11, color:"#475569", textTransform:"uppercase", letterSpacing:"0.05em" }}>CC0 Photos</span>
+        <span style={{ fontSize:10, color:"#1e293b", marginLeft:"auto" }}>iNaturalist · research grade</span>
+      </div>
+
+      {/* Photos */}
+      <div style={{ flex:1, overflowY:"auto", padding:16 }}>
+        {loading && (
+          <div style={{ textAlign:"center", padding:32, color:"#475569" }}>
+            <div style={{ fontSize:32 }}>📸</div>
+            <div style={{ fontSize:12, marginTop:8 }}>Searching iNaturalist for <span style={{ fontStyle:"italic" }}>{name}</span>…</div>
+          </div>
+        )}
+        {!loading && photos.length === 0 && (
+          <div style={{ textAlign:"center", padding:32 }}>
+            <div style={{ fontSize:32, marginBottom:8 }}>🔍</div>
+            <div style={{ fontSize:13, color:"#334155", marginBottom:8 }}>No CC0 photos found for</div>
+            <div style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:14, color:"#64748b", marginBottom:16 }}>{name}</div>
+            <div style={{ fontSize:11, color:"#1e293b", lineHeight:1.7 }}>
+              Subspecies records on iNaturalist are often filed under the parent species.<br/>
+              <span onClick={onOpenParent} style={{ color:"#7dd3fc", cursor:"pointer" }}>View parent species photos →</span>
+            </div>
+          </div>
+        )}
+        {!loading && photos.length > 0 && <PhotoGalleryRaw photos={photos} sciName={name}/>}
+      </div>
+
+      <div style={{ padding:"7px 14px", borderTop:"1px solid #0f172a", fontSize:9, color:"#1e293b", display:"flex", justifyContent:"space-between" }}>
+        <span>MDD v2.4 subspecies</span><span>iNaturalist CC0</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Tree components ────────────────────────────────────────────────────────
-function SubspeciesRows({ sp }) {
+function SubspeciesRows({ sp, onSelectSsp }) {
+  const [hov, setHov] = useState(null);
   return (
     <div>
       {sp.ssp.map((name,i)=>(
-        <div key={i} style={{ display:"flex", alignItems:"center", gap:7, padding:"3px 10px 3px 50px" }}>
+        <div key={i} onClick={()=>onSelectSsp({name, parentSp: sp})}
+          onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
+          style={{ display:"flex", alignItems:"center", gap:7, padding:"4px 10px 4px 50px", cursor:"pointer", borderRadius:6, background:hov===i?"#070f1d":"transparent", transition:"background 0.1s" }}>
           <div style={{ width:3, height:3, borderRadius:"50%", background:"#1e3a5f", flexShrink:0 }}/>
-          <span style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:11, color:"#1e3a5f" }}>{name}</span>
+          <span style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:11, color:"#475569" }}>{name}</span>
+          <span style={{ fontSize:9, color:"#1e3a5f", marginLeft:"auto" }}>📸</span>
         </div>
       ))}
     </div>
   );
 }
 
-function SpeciesRow({ sp, onClick, isSelected, showSsp }) {
+function SpeciesRow({ sp, onClick, isSelected, showSsp, onSelectSsp }) {
   const [hov, setHov] = useState(false);
   const [sspOpen, setSspOpen] = useState(false);
   const hasSsp = showSsp && sp.ssp && sp.ssp.length>0;
@@ -311,12 +391,12 @@ function SpeciesRow({ sp, onClick, isSelected, showSsp }) {
         {hasSsp  && <span style={{ fontSize:9, color:"#1e3a5f" }}>{sp.ssp.length}ssp</span>}
         <Badge status={sp.st}/>
       </div>
-      {sspOpen && hasSsp && <SubspeciesRows sp={sp}/>}
+      {sspOpen && hasSsp && <SubspeciesRows sp={sp} onSelectSsp={onSelectSsp}/>}
     </div>
   );
 }
 
-function GenusNode({ name, spp, onSelect, selected, showSsp }) {
+function GenusNode({ name, spp, onSelect, selected, showSsp, onSelectSsp }) {
   const [open, setOpen] = useState(false);
   const [hov, setHov] = useState(false);
   const threatened = useMemo(()=>spp.filter(s=>["CR","EN","VU"].includes(s.st)).length,[spp]);
@@ -330,13 +410,13 @@ function GenusNode({ name, spp, onSelect, selected, showSsp }) {
         {threatened>0 && <span style={{ fontSize:9, color:"#fb923c", marginLeft:2 }}>⚠ {threatened}</span>}
       </div>
       {open && spp.map((sp,i)=>(
-        <SpeciesRow key={i} sp={sp} onClick={()=>onSelect(sp)} isSelected={selected?.sci===sp.sci} showSsp={showSsp}/>
+        <SpeciesRow key={i} sp={sp} onClick={()=>onSelect(sp)} isSelected={selected?.sci===sp.sci} showSsp={showSsp} onSelectSsp={onSelectSsp}/>
       ))}
     </div>
   );
 }
 
-function FamilyNode({ name, genera, onSelect, selected, showSsp }) {
+function FamilyNode({ name, genera, onSelect, selected, showSsp, onSelectSsp }) {
   const [open, setOpen] = useState(false);
   const [hov, setHov] = useState(false);
   const { total, threatened } = useMemo(()=>{
@@ -354,13 +434,13 @@ function FamilyNode({ name, genera, onSelect, selected, showSsp }) {
         {threatened>0 && <span style={{ fontSize:9, color:"#f87171", background:"#1a0505", padding:"1px 5px", borderRadius:3 }}>{threatened} threatened</span>}
       </div>
       {open && Object.entries(genera).sort(([a],[b])=>a.localeCompare(b)).map(([genus,spp])=>(
-        <GenusNode key={genus} name={genus} spp={spp} onSelect={onSelect} selected={selected} showSsp={showSsp}/>
+        <GenusNode key={genus} name={genus} spp={spp} onSelect={onSelect} selected={selected} showSsp={showSsp} onSelectSsp={onSelectSsp}/>
       ))}
     </div>
   );
 }
 
-function OrderNode({ name, families, onSelect, selected, filterStatus, filterRealm, showSsp }) {
+function OrderNode({ name, families, onSelect, selected, filterStatus, filterRealm, showSsp, onSelectSsp }) {
   const [open, setOpen] = useState(false);
   const filtered = useMemo(()=>{
     const r={};
@@ -386,7 +466,7 @@ function OrderNode({ name, families, onSelect, selected, filterStatus, filterRea
       {open && (
         <div style={{ paddingTop:3 }}>
           {Object.entries(filtered).sort(([a],[b])=>a.localeCompare(b)).map(([fam,genera])=>(
-            <FamilyNode key={fam} name={fam} genera={genera} onSelect={onSelect} selected={selected} showSsp={showSsp}/>
+            <FamilyNode key={fam} name={fam} genera={genera} onSelect={onSelect} selected={selected} showSsp={showSsp} onSelectSsp={onSelectSsp}/>
           ))}
         </div>
       )}
@@ -419,8 +499,9 @@ function App() {
   const [tree, setTree]         = useState(null);
   const [allSp, setAllSp]       = useState([]);
   const [counts, setCounts]     = useState({});
-  const [selected, setSelected] = useState(null);
-  const [search, setSearch]     = useState("");
+  const [selected, setSelected]     = useState(null);
+  const [selectedSsp, setSelectedSsp] = useState(null); // {name, parentSp}
+  const [search, setSearch]           = useState("");
   const [filter, setFilter]     = useState(null);
   const [realmFilter, setRealmFilter] = useState(null);
   const [showSsp, setShowSsp]   = useState(true);
@@ -452,7 +533,22 @@ function App() {
       .catch(e=>{setLoadErr(e.message);document.getElementById("splash").style.display="none";});
   },[]);
 
-  const onSelect = useCallback(sp=>setSelected(s=>s?.sci===sp.sci?null:sp),[]);
+  const onSelect = useCallback(sp=>{
+    setSelectedSsp(null);
+    setSelected(s=>s?.sci===sp.sci?null:sp);
+  },[]);
+
+  const onSelectSsp = useCallback(ssp=>{
+    setSelectedSsp(ssp);
+    setSelected(null);
+  },[]);
+
+  const openParentFromSsp = useCallback(()=>{
+    if(selectedSsp){
+      setSelected(selectedSsp.parentSp);
+      setSelectedSsp(null);
+    }
+  },[selectedSsp]);
 
   const realms = useMemo(()=>{
     const r=new Set();
@@ -515,7 +611,7 @@ function App() {
         <div style={{ flex:1, overflowY:"auto", padding:"6px 4px" }}>
           {search
             ? <SearchResults query={search} allSpecies={allSp} onSelect={onSelect}/>
-            : orders.map(o=><OrderNode key={o} name={o} families={tree[o]} onSelect={onSelect} selected={selected} filterStatus={filter} filterRealm={realmFilter} showSsp={showSsp}/>)
+            : orders.map(o=><OrderNode key={o} name={o} families={tree[o]} onSelect={onSelect} selected={selected} filterStatus={filter} filterRealm={realmFilter} showSsp={showSsp} onSelectSsp={onSelectSsp}/>)
           }
         </div>
 
@@ -530,7 +626,8 @@ function App() {
         </div>
       </div>
 
-      {selected && <SpeciesPanel sp={selected} onClose={()=>setSelected(null)}/>}
+      {selected    && <SpeciesPanel sp={selected} onClose={()=>setSelected(null)} onSelectSsp={onSelectSsp}/>}
+      {selectedSsp && <SubspeciesDetailPanel ssp={selectedSsp} onClose={()=>setSelectedSsp(null)} onOpenParent={openParentFromSsp}/>}
     </div>
   );
 }
