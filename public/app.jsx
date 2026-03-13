@@ -18,6 +18,9 @@ const SM = {
 };
 const sc = s => (SM[s] || SM.NE).c;
 
+// Filter out fossil-only subspecies (MDD marks these with "(fossil)" suffix)
+const liveSsp = ssp => (ssp || []).filter(s => !s.includes("(fossil)"));
+
 // ── IUCN live lookup via Cloudflare Worker proxy ─────────────────────────
 // Set this to your Worker URL after deploying cloudflare-worker/iucn-proxy.js
 // e.g. "https://iucn-proxy.YOUR-SUBDOMAIN.workers.dev"
@@ -273,23 +276,65 @@ function IUCNPanel({ sciName }) {
         <InfoRow label="Possibly extinct" value={a.possibly_extinct_in_the_wild ? "⚠ In the wild" : "⚠ Yes"} />
       )}
 
-      {threats.length>0 && (
-        <div style={{ marginTop:12 }}>
-          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Main threats</div>
-          {threats
-            .filter(threat => {
-              const name = threat.description?.en || "";
-              return !name.toLowerCase().includes("unknown") && !name.toLowerCase().includes("unrecorded");
-            })
-            .slice(0,8).map((threat,i)=>(
-            <div key={i} style={{ fontSize:12, color:"#94a3b8", padding:"4px 0", borderBottom:"1px solid #0a1628" }}>
-              {threat.description?.en || ""}
-              {threat.scope    ? <span style={{ color:"#475569" }}> · {threat.scope}</span>    : ""}
-              {threat.severity ? <span style={{ color:"#334155" }}> · {threat.severity}</span> : ""}
-            </div>
-          ))}
-        </div>
-      )}
+      {threats.length>0 && (() => {
+        // Group leaf threats under their parent category (code "5_1_1" → parent "5_1")
+        const isUnknown = s => !s || s.toLowerCase().includes("unknown") || s.toLowerCase().includes("unrecorded");
+        const groups = [];
+        const groupMap = {};
+        threats.forEach(threat => {
+          if (isUnknown(threat.description?.en)) return;
+          const code = threat.code || "";
+          const parts = code.split("_");
+          // Parent code = all but last segment, e.g. "5_1_1" → "5_1"
+          const parentCode = parts.length > 1 ? parts.slice(0, -1).join("_") : null;
+          const parentName = threat.title || null; // IUCN v4 sometimes provides parent title
+          // Try to find existing group with this parentCode
+          if (parentCode && groupMap[parentCode]) {
+            groupMap[parentCode].children.push(threat);
+          } else if (parentCode) {
+            const g = { parentCode, parentName, children: [threat] };
+            groups.push(g);
+            groupMap[parentCode] = g;
+          } else {
+            // Top-level threat with no parent
+            groups.push({ parentCode: null, parentName: null, children: [threat] });
+          }
+        });
+        if (groups.length === 0) return null;
+        return (
+          <div style={{ marginTop:12 }}>
+            <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Main threats</div>
+            {groups.slice(0,8).map((g,gi) => (
+              <div key={gi} style={{ marginBottom:6, borderLeft:"2px solid #0f2040", paddingLeft:10 }}>
+                {/* Show parent label if multiple children share it */}
+                {g.children.length > 1 && (
+                  <div style={{ fontSize:10, color:"#475569", marginBottom:3, fontStyle:"italic" }}>
+                    {g.children[0].description?.en?.split(":")[0] || ""}
+                  </div>
+                )}
+                {g.children.map((threat,ti) => {
+                  // Leaf name: strip parent prefix if present (e.g. "Hunting…: Intentional use")
+                  const fullName = threat.description?.en || "";
+                  const colonIdx = fullName.indexOf(":");
+                  const leafName = g.children.length > 1 && colonIdx > -1
+                    ? fullName.slice(colonIdx + 1).trim()
+                    : fullName;
+                  return (
+                    <div key={ti} style={{ fontSize:12, color:"#94a3b8", padding:"3px 0", borderBottom:"1px solid #0a1628", display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
+                      <span>{leafName}</span>
+                      <span style={{ whiteSpace:"nowrap", fontSize:11 }}>
+                        {!isUnknown(threat.scope)    && <span style={{ color:"#475569" }}>{threat.scope}</span>}
+                        {!isUnknown(threat.scope) && !isUnknown(threat.severity) && <span style={{ color:"#334155" }}> · </span>}
+                        {!isUnknown(threat.severity) && <span style={{ color:"#334155" }}>{threat.severity}</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {habitats.length>0 && (
         <div style={{ marginTop:12 }}>
@@ -385,11 +430,12 @@ function MDDPanel({ sp }) {
 
 function SubspeciesPanel({ sp, onSelectSsp }) {
   const [hov, setHov] = useState(null);
-  if (!sp.ssp||sp.ssp.length===0) return <div style={{ textAlign:"center", padding:32, color:"#334155", fontSize:13 }}>No subspecies recorded in MDD v2.4.</div>;
+  const ssps = liveSsp(sp.ssp);
+  if (!ssps.length) return <div style={{ textAlign:"center", padding:32, color:"#334155", fontSize:13 }}>No subspecies recorded in MDD v2.4.</div>;
   return (
     <div>
-      <div style={{ fontSize:11, color:"#334155", marginBottom:12 }}>{sp.ssp.length} subspecies recognised in MDD v2.4 · click to view photos</div>
-      {sp.ssp.map((name,i)=>(
+      <div style={{ fontSize:11, color:"#334155", marginBottom:12 }}>{ssps.length} subspecies recognised in MDD v2.4 · click to view photos</div>
+      {ssps.map((name,i)=>(
         <div key={i} onClick={()=>onSelectSsp({name, parentSp:sp})}
           onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
           style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:6, marginBottom:3, background:hov===i?"#0f2040":"#07101f", cursor:"pointer", transition:"background 0.1s" }}>
@@ -404,8 +450,9 @@ function SubspeciesPanel({ sp, onSelectSsp }) {
 
 function SpeciesPanel({ sp, onClose, onSelectSsp }) {
   const [tab, setTab] = useState("photos");
+  const ssps = liveSsp(sp.ssp);
   const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"],["mdd","📋","MDD"],
-    ...(sp.ssp?.length?[["ssp","🔬","Subspecies"]]:[])]
+    ...(ssps.length?[["ssp","🔬","Subspecies"]]:[])]
 
   // Fetch IUCN to get live status for header badge
   const { data: iucnData } = useIUCN(sp.sci);
@@ -424,7 +471,7 @@ function SpeciesPanel({ sp, onClose, onSelectSsp }) {
               {sp.ex  && <span style={{ fontSize:10, color:"#64748b", background:"#0f172a", padding:"2px 6px", borderRadius:4 }}>† EXTINCT</span>}
               {sp.dom && <span style={{ fontSize:10, color:"#fbbf24", background:"#0f172a", padding:"2px 6px", borderRadius:4 }}>DOMESTIC</span>}
               {sp.flag && <span style={{ fontSize:10, color:"#f87171", background:"#0f172a", padding:"2px 6px", borderRadius:4 }}>⚑ FLAGGED</span>}
-              {sp.ssp?.length>0 && <span style={{ fontSize:10, color:"#7dd3fc", background:"#0f172a", padding:"2px 6px", borderRadius:4 }}>{sp.ssp.length} ssp.</span>}
+              {ssps.length>0 && <span style={{ fontSize:10, color:"#7dd3fc", background:"#0f172a", padding:"2px 6px", borderRadius:4 }}>{ssps.length} ssp.</span>}
             </div>
           </div>
           <button onClick={onClose} style={{ background:"none", border:"none", color:"#475569", fontSize:22, cursor:"pointer", lineHeight:1, padding:2 }}>✕</button>
@@ -545,7 +592,7 @@ function SubspeciesRows({ sp, onSelectSsp }) {
   const [hov, setHov] = useState(null);
   return (
     <div>
-      {sp.ssp.map((name,i)=>(
+      {liveSsp(sp.ssp).map((name,i)=>(
         <div key={i} onClick={()=>onSelectSsp({name, parentSp: sp})}
           onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
           style={{ display:"flex", alignItems:"center", gap:7, padding:"4px 10px 4px 50px", cursor:"pointer", borderRadius:6, background:hov===i?"#070f1d":"transparent", transition:"background 0.1s" }}>
@@ -561,7 +608,8 @@ function SubspeciesRows({ sp, onSelectSsp }) {
 function SpeciesRow({ sp, onClick, isSelected, showSsp, onSelectSsp }) {
   const [hov, setHov] = useState(false);
   const [sspOpen, setSspOpen] = useState(false);
-  const hasSsp = showSsp && sp.ssp && sp.ssp.length>0;
+  const ssps = liveSsp(sp.ssp);
+  const hasSsp = showSsp && ssps.length > 0;
   return (
     <div>
       <div onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
@@ -578,7 +626,7 @@ function SpeciesRow({ sp, onClick, isSelected, showSsp, onSelectSsp }) {
         {sp.ex   && <span style={{ fontSize:9, color:"#475569" }} title="Extinct">†</span>}
         {sp.dom  && <span style={{ fontSize:9 }} title="Domestic">🏠</span>}
         {sp.flag && <span style={{ fontSize:9, color:"#f87171" }} title="Flagged">⚑</span>}
-        {hasSsp  && <span style={{ fontSize:9, color:"#1e3a5f" }}>{sp.ssp.length}ssp</span>}
+        {hasSsp  && <span style={{ fontSize:9, color:"#1e3a5f" }}>{ssps.length}ssp</span>}
         <Badge status={sp.st}/>
       </div>
       {sspOpen && hasSsp && <SubspeciesRows sp={sp} onSelectSsp={onSelectSsp}/>}
@@ -673,7 +721,7 @@ function SearchResults({ query, allSpecies, onSelect }) {
       (sp.com&&sp.com.toLowerCase().includes(q))||
       (sp.com2&&sp.com2.toLowerCase().includes(q))||
       sp.synonyms?.some(s=>s.toLowerCase().includes(q))||
-      sp.ssp?.some(s=>s.toLowerCase().includes(q))
+      liveSsp(sp.ssp).some(s=>s.toLowerCase().includes(q))
     ).slice(0,60);
   },[query,allSpecies]);
   return (
