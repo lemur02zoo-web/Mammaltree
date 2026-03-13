@@ -126,50 +126,100 @@ function IUCNPanel({ sciName }) {
   if (loading) return <div style={{ color:"#475569", fontSize:12, textAlign:"center", padding:20 }}>Looking up IUCN data…</div>;
   if (error)   return <div style={{ color:"#64748b", fontSize:12, padding:12, background:"#0a1628", borderRadius:6, lineHeight:1.6 }}>ℹ {error}</div>;
   if (!data)   return null;
-  const sisUrl = data.sis_id ? `https://www.iucnredlist.org/species/${data.sis_id}` : data.assessment_url;
+
+  // New structure: data.assessment = full assessment object, data.taxon = taxon object
+  const a   = data.assessment || {};
+  const t   = data.taxon || {};
+  const cat = (a.red_list_category || {}).code;
+  const sisId = t.sis_id || t.taxon_id;
+  const sisUrl = sisId ? `https://www.iucnredlist.org/species/${sisId}` : (a.url || null);
+
+  // Narrative fields (stored directly on assessment object)
+  const narratives = {
+    rationale:      a.rationale,
+    geographic:     a.geographic_range,
+    population:     a.population,
+    habitat:        a.habitat,
+    threats:        a.threats,
+    conservation:   a.conservation_actions,
+    use_trade:      a.use_trade,
+  };
+
+  // Habitats, threats, conservation actions are arrays on the assessment
+  const habitats = a.habitats || [];
+  const threats  = a.threats_list || a.threats_table || [];
+  const actions  = a.conservation_actions_list || a.conservation_actions_table || [];
+
+  const NarrBlock = ({label, text}) => !text ? null : (
+    <div style={{ marginTop:12 }}>
+      <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5 }}>{label}</div>
+      <div style={{ fontSize:12, color:"#64748b", lineHeight:1.7 }}>{text.slice(0,400)}{text.length>400?"…":""}</div>
+    </div>
+  );
+
   return (
     <div>
-      {data.category && (
+      {cat && (
         <div style={{ marginBottom:14, padding:"12px 14px", background:"#0a1628", borderRadius:8 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>IUCN Red List Category</div>
-          <Badge status={data.category} large />
-          {data.year_published && <span style={{ color:"#475569", marginLeft:8, fontSize:11 }}>({data.year_published})</span>}
+          <Badge status={cat} large />
+          {a.year_published && <span style={{ color:"#475569", marginLeft:8, fontSize:11 }}>({a.year_published})</span>}
         </div>
       )}
-      <InfoRow label="Population trend" value={data.population_trend} />
-      <InfoRow label="Criteria" value={data.criteria} />
-      {data.population?.size && <InfoRow label="Population size" value={String(data.population.size)} />}
-      {data.population?.generation_length_min && (
+      <InfoRow label="Population trend"  value={a.population_trend} />
+      <InfoRow label="Criteria"          value={a.criteria} />
+      <InfoRow label="Population size"   value={a.population_size ? String(a.population_size) : null} />
+      {(a.generation_length_min || a.generation_length_max) && (
         <InfoRow label="Generation length"
-          value={data.population.generation_length_min===data.population.generation_length_max
-            ? `${data.population.generation_length_min} yrs`
-            : `${data.population.generation_length_min}–${data.population.generation_length_max} yrs`} />
+          value={a.generation_length_min === a.generation_length_max
+            ? `${a.generation_length_min} yrs`
+            : `${a.generation_length_min||"?"}–${a.generation_length_max||"?"} yrs`} />
       )}
-      {data.possibly_extinct && <InfoRow label="Possibly extinct" value="⚠ Yes" />}
-      {data.threats?.length>0 && (
+      <InfoRow label="No. of locations"     value={a.no_of_locations ? String(a.no_of_locations) : null} />
+      <InfoRow label="No. of subpopulations" value={a.no_of_subpopulations ? String(a.no_of_subpopulations) : null} />
+      {(a.possibly_extinct || a.possibly_extinct_in_the_wild) && (
+        <InfoRow label="Possibly extinct" value={a.possibly_extinct_in_the_wild ? "⚠ In the wild" : "⚠ Yes"} />
+      )}
+
+      {threats.length>0 && (
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Main threats</div>
-          {data.threats.slice(0,4).map((t,i)=>(
-            <div key={i} style={{ fontSize:12, color:"#94a3b8", padding:"3px 0", borderBottom:"1px solid #0a1628" }}>
-              {t.name}{t.severity?<span style={{ color:"#475569" }}> · {t.severity}</span>:""}
+          {threats.slice(0,5).map((t,i)=>(
+            <div key={i} style={{ fontSize:12, color:"#94a3b8", padding:"4px 0", borderBottom:"1px solid #0a1628" }}>
+              {t.description||t.name||t.title}
+              {t.timing ? <span style={{ color:"#334155" }}> · {t.timing}</span> : ""}
+              {t.severity ? <span style={{ color:"#475569" }}> · {t.severity}</span> : ""}
             </div>
           ))}
         </div>
       )}
-      {data.habitats?.length>0 && (
+
+      {habitats.length>0 && (
         <div style={{ marginTop:12 }}>
-          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Habitats</div>
-          <div style={{ fontSize:12, color:"#94a3b8" }}>
-            {data.habitats.filter(h=>h.suitability==="Suitable"||!h.suitability).slice(0,4).map(h=>h.name).join(", ")}
+          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5 }}>Habitats</div>
+          <div style={{ fontSize:12, color:"#94a3b8", lineHeight:1.7 }}>
+            {habitats.slice(0,6).map(h=>h.description||h.name||h.title).filter(Boolean).join(" · ")}
           </div>
         </div>
       )}
-      {data.narratives?.population && (
-        <div style={{ marginTop:12 }}>
-          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Population</div>
-          <div style={{ fontSize:12, color:"#64748b", lineHeight:1.6 }}>{data.narratives.population.slice(0,300)}{data.narratives.population.length>300?"…":""}</div>
+
+      <NarrBlock label="Rationale"          text={narratives.rationale} />
+      <NarrBlock label="Population"         text={narratives.population} />
+      <NarrBlock label="Habitat & Ecology"  text={narratives.habitat} />
+      <NarrBlock label="Threats"            text={narratives.threats} />
+      <NarrBlock label="Conservation"       text={narratives.conservation} />
+      <NarrBlock label="Geographic range"   text={narratives.geographic} />
+
+      {/* Assessed subspecies */}
+      {data.subspecies_accounts?.length > 0 && (
+        <div style={{ marginTop:14, padding:"10px 12px", background:"#07101f", borderRadius:6 }}>
+          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>IUCN-assessed subspecies</div>
+          {data.subspecies_accounts.map((name,i)=>(
+            <div key={i} style={{ fontSize:12, color:"#475569", fontStyle:"italic", padding:"2px 0" }}>{name}</div>
+          ))}
         </div>
       )}
+
       {sisUrl && <a href={sisUrl} target="_blank" rel="noreferrer" style={{ display:"inline-block", marginTop:14, color:"#7dd3fc", fontSize:12, textDecoration:"none" }}>View on IUCN Red List ↗</a>}
     </div>
   );
