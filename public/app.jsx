@@ -21,7 +21,7 @@ const sc = s => (SM[s] || SM.NE).c;
 // ── IUCN live lookup via Cloudflare Worker proxy ─────────────────────────
 // Set this to your Worker URL after deploying cloudflare-worker/iucn-proxy.js
 // e.g. "https://iucn-proxy.YOUR-SUBDOMAIN.workers.dev"
-const IUCN_PROXY = "https://iucn-proxy.YOUR-SUBDOMAIN.workers.dev";
+const IUCN_PROXY = "https://iucn-proxy.lemur02zoo.workers.dev";
 
 // Per-session cache so we don't re-fetch the same species twice
 const iucnCache = {};
@@ -43,48 +43,55 @@ function useIUCN(sciName) {
     const encoded = encodeURIComponent(sciName.trim());
 
     // Step 1: get taxon + assessment list
-    // API uses query params: ?genus_name=X&species_name=Y[&infra_name=Z]
     const parts = sciName.trim().split(" ");
     const params = new URLSearchParams({ genus_name: parts[0], species_name: parts[1] || "" });
-    if (parts[2]) params.set("infra_name", parts[2]);  // subspecies
+    if (parts[2]) params.set("infra_name", parts[2]);
+
     fetch(`${IUCN_PROXY}/taxa/scientific_name?${params}`)
-      .then(r => r.json())
-      .then(async taxa => {
-        if (!taxa?.taxon) {
+      .then(r => { if (!r.ok) throw new Error(`Taxa fetch failed: ${r.status}`); return r.json(); })
+      .then(async resp => {
+        // Response structure: { taxon: { ...infrarank_taxa, subpopulation_taxa }, assessments: [...] }
+        const taxon       = resp.taxon;
+        const assessments = resp.assessments || [];
+
+        if (!taxon) {
           iucnCache[sciName] = null;
           setState({ data: null, loading: false, error: "Not found in IUCN Red List" });
           return;
         }
 
-        const assessments = taxa.assessments || [];
-        const latest = assessments.find(a => a.latest && !a.subpopulation) || assessments[0];
-        const infrarank = taxa.infrarank_taxa || [];
-        const sspNames  = infrarank
-          .map(t => t.scientific_name || `${taxa.taxon.genus_name} ${taxa.taxon.species_name} ${t.infrarank_name||""}`.trim())
-          .filter(Boolean);
+        // Latest global assessment: latest=true AND scope code "1" (not regional)
+        const latest = assessments.find(a => a.latest && a.scopes?.some(s => s.code === "1"))
+                    || assessments.find(a => a.latest)
+                    || assessments[0];
+
+        // Subspecies: infrarank_taxa lives inside taxon
+        const sspNames = (taxon.infrarank_taxa || [])
+          .map(t => t.scientific_name).filter(Boolean);
+
+        // Subpopulations: subpopulation_taxa lives inside taxon
+        const subpopNames = (taxon.subpopulation_taxa || [])
+          .map(t => t.scientific_name).filter(Boolean);
 
         let assessment = null;
         if (latest?.assessment_id) {
-          // Step 2: get full assessment detail
-          const detail = await fetch(`${IUCN_PROXY}/assessment/${latest.assessment_id}`)
-            .then(r => r.json())
+          assessment = await fetch(`${IUCN_PROXY}/assessment/${latest.assessment_id}`)
+            .then(r => r.ok ? r.json() : null)
             .catch(() => null);
-          assessment = detail;
         }
 
         const result = {
-          taxon:               taxa.taxon,
-          assessment:          assessment,
-          assessment_history:  assessments,
-          subspecies_accounts: sspNames,
+          taxon,
+          assessment,
+          assessment_history:     assessments,
+          subspecies_accounts:    sspNames,
+          subpopulation_accounts: subpopNames,
         };
 
         iucnCache[sciName] = result;
         setState({ data: result, loading: false, error: null });
       })
-      .catch(e => {
-        setState({ data: null, loading: false, error: e.message });
-      });
+      .catch(e => setState({ data: null, loading: false, error: e.message }));
   }, [sciName]);
   return state;
 }
