@@ -18,29 +18,69 @@ const SM = {
 };
 const sc = s => (SM[s] || SM.NE).c;
 
-// IUCN static cache
-let iucnCache = null, iucnPromise = null;
-function loadIUCN() {
-  if (iucnCache) return Promise.resolve(iucnCache);
-  if (!iucnPromise) {
-    iucnPromise = fetch("/iucn_enriched.json")
-      .then(r => r.ok ? r.json() : {})
-      .then(d => { iucnCache = d; return d; })
-      .catch(() => { iucnCache = {}; return {}; });
-  }
-  return iucnPromise;
-}
+// ── IUCN live lookup via Cloudflare Worker proxy ─────────────────────────
+// Set this to your Worker URL after deploying cloudflare-worker/iucn-proxy.js
+// e.g. "https://iucn-proxy.YOUR-SUBDOMAIN.workers.dev"
+const IUCN_PROXY = "https://iucn-proxy.lemur02zoo.workers.dev";
+
+// Per-session cache so we don't re-fetch the same species twice
+const iucnCache = {};
 
 function useIUCN(sciName) {
   const [state, setState] = useState({ data: null, loading: false, error: null });
   useEffect(() => {
     if (!sciName) return;
+
+    // Return from cache instantly if already fetched this session
+    if (iucnCache[sciName] !== undefined) {
+      const cached = iucnCache[sciName];
+      if (cached) setState({ data: cached, loading: false, error: null });
+      else        setState({ data: null, loading: false, error: "Not found in IUCN Red List" });
+      return;
+    }
+
     setState({ data: null, loading: true, error: null });
-    loadIUCN().then(db => {
-      const d = db[sciName];
-      if (d && (d.category || d.sis_id)) setState({ data: d, loading: false, error: null });
-      else setState({ data: null, loading: false, error: "Run fetch_iucn_data.py to populate IUCN data" });
-    });
+    const encoded = encodeURIComponent(sciName.trim());
+
+    // Step 1: get taxon + assessment list
+    fetch(`${IUCN_PROXY}/taxa/scientific_name/${encoded}`)
+      .then(r => r.json())
+      .then(async taxa => {
+        if (!taxa?.taxon) {
+          iucnCache[sciName] = null;
+          setState({ data: null, loading: false, error: "Not found in IUCN Red List" });
+          return;
+        }
+
+        const assessments = taxa.assessments || [];
+        const latest = assessments.find(a => a.latest && !a.subpopulation) || assessments[0];
+        const infrarank = taxa.infrarank_taxa || [];
+        const sspNames  = infrarank
+          .map(t => t.scientific_name || `${taxa.taxon.genus_name} ${taxa.taxon.species_name} ${t.infrarank_name||""}`.trim())
+          .filter(Boolean);
+
+        let assessment = null;
+        if (latest?.assessment_id) {
+          // Step 2: get full assessment detail
+          const detail = await fetch(`${IUCN_PROXY}/assessment/${latest.assessment_id}`)
+            .then(r => r.json())
+            .catch(() => null);
+          assessment = detail;
+        }
+
+        const result = {
+          taxon:               taxa.taxon,
+          assessment:          assessment,
+          assessment_history:  assessments,
+          subspecies_accounts: sspNames,
+        };
+
+        iucnCache[sciName] = result;
+        setState({ data: result, loading: false, error: null });
+      })
+      .catch(e => {
+        setState({ data: null, loading: false, error: e.message });
+      });
   }, [sciName]);
   return state;
 }
