@@ -276,11 +276,11 @@ function IUCNPanel({ sciName }) {
       {threats.length>0 && (
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Main threats</div>
-          {threats.slice(0,6).map((t,i)=>(
+          {threats.slice(0,6).map((threat,i)=>(
             <div key={i} style={{ fontSize:12, color:"#94a3b8", padding:"4px 0", borderBottom:"1px solid #0a1628" }}>
-              {str(t.description)}
-              {t.scope    ? <span style={{ color:"#475569" }}> · {t.scope}</span>    : ""}
-              {t.severity ? <span style={{ color:"#334155" }}> · {t.severity}</span> : ""}
+              {threat.description?.en || threat.description || ""}
+              {threat.scope    ? <span style={{ color:"#475569" }}> · {threat.scope}</span>    : ""}
+              {threat.severity ? <span style={{ color:"#334155" }}> · {threat.severity}</span> : ""}
             </div>
           ))}
         </div>
@@ -289,10 +289,11 @@ function IUCNPanel({ sciName }) {
       {habitats.length>0 && (
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5 }}>Habitats</div>
-          {habitats.filter(h=>h.suitability==="Suitable"||h.majorImportance==="Yes").slice(0,6).map((h,i)=>(
+          {habitats.slice(0,8).map((hab,i)=>(
             <div key={i} style={{ fontSize:12, color:"#94a3b8", padding:"2px 0" }}>
-              {str(h.description)}
-              {h.majorImportance==="Yes" ? <span style={{ color:"#475569" }}> ★</span> : ""}
+              {hab.description?.en || hab.description || ""}
+              {hab.suitability ? <span style={{ color:"#475569" }}> · {hab.suitability}</span> : ""}
+              {hab.majorImportance==="Yes" ? <span style={{ color:"#64748b" }}> ★</span> : ""}
             </div>
           ))}
         </div>
