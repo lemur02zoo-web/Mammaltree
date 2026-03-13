@@ -198,28 +198,48 @@ function IUCNPanel({ sciName }) {
   if (error)   return <div style={{ color:"#64748b", fontSize:12, padding:12, background:"#0a1628", borderRadius:6, lineHeight:1.6 }}>ℹ {error}</div>;
   if (!data)   return null;
 
-  // New structure: data.assessment = full assessment object, data.taxon = taxon object
+  // assessment fields are often {description:{en:"..."}, code:"..."} objects
   const a   = data.assessment || {};
   const t   = data.taxon || {};
-  const cat = (a.red_list_category || {}).code;
-  const sisId = t.sis_id || t.taxon_id;
-  const sisUrl = sisId ? `https://www.iucnredlist.org/species/${sisId}` : (a.url || null);
 
-  // Narrative fields (stored directly on assessment object)
-  const narratives = {
-    rationale:      a.rationale,
-    geographic:     a.geographic_range,
-    population:     a.population,
-    habitat:        a.habitat,
-    threats:        a.threats,
-    conservation:   a.conservation_actions,
-    use_trade:      a.use_trade,
+  // Helper: extract string from {description:{en:"..."}, code:"..."} or plain string
+  const str = (v) => {
+    if (!v) return null;
+    if (typeof v === "string") return v;
+    if (v.description?.en) return v.description.en;
+    if (v.description && typeof v.description === "string") return v.description;
+    if (v.code) return v.code;
+    if (v.name) return v.name;
+    return null;
   };
 
-  // Habitats, threats, conservation actions are arrays on the assessment
-  const habitats = a.habitats || [];
-  const threats  = a.threats_list || a.threats_table || [];
-  const actions  = a.conservation_actions_list || a.conservation_actions_table || [];
+  const cat    = str(a.red_list_category);
+  const catCode = (a.red_list_category || {}).code || cat;
+  const trend  = str(a.population_trend);
+  const sisId  = t.sis_id || t.taxon_id;
+  const sisUrl = sisId ? `https://www.iucnredlist.org/species/${sisId}` : (a.url || null);
+
+  // Narrative text fields — may be plain strings or {en:"..."} objects
+  const getText = (v) => {
+    if (!v) return null;
+    if (typeof v === "string") return v;
+    if (v.en) return v.en;
+    return null;
+  };
+  const narratives = {
+    rationale:    getText(a.rationale),
+    geographic:   getText(a.geographic_range),
+    population:   getText(a.population),
+    habitat:      getText(a.habitat),
+    threats:      getText(a.threats_text || a.threat),
+    conservation: getText(a.conservation_actions_text || a.conservation_actions),
+    use_trade:    getText(a.use_trade),
+  };
+
+  // Structured arrays
+  const habitats = Array.isArray(a.habitats) ? a.habitats : [];
+  const threats  = Array.isArray(a.threats)  ? a.threats  : [];
+  const actions  = Array.isArray(a.conservation_actions) ? a.conservation_actions : [];
 
   const NarrBlock = ({label, text}) => {
     const s = safeStr(text);
@@ -234,14 +254,14 @@ function IUCNPanel({ sciName }) {
 
   return (
     <div>
-      {cat && (
+      {catCode && (
         <div style={{ marginBottom:14, padding:"12px 14px", background:"#0a1628", borderRadius:8 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>IUCN Red List Category</div>
-          <Badge status={cat} large />
+          <Badge status={catCode} large />
           {a.year_published && <span style={{ color:"#475569", marginLeft:8, fontSize:11 }}>({a.year_published})</span>}
         </div>
       )}
-      <InfoRow label="Population trend"  value={a.population_trend} />
+      <InfoRow label="Population trend"  value={trend} />
       <InfoRow label="Criteria"          value={a.criteria} />
       <InfoRow label="Population size"   value={a.population_size ? String(a.population_size) : null} />
       {(a.generation_length_min || a.generation_length_max) && (
@@ -261,9 +281,9 @@ function IUCNPanel({ sciName }) {
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Main threats</div>
           {threats.slice(0,5).map((t,i)=>(
             <div key={i} style={{ fontSize:12, color:"#94a3b8", padding:"4px 0", borderBottom:"1px solid #0a1628" }}>
-              {t.description||t.name||t.title}
-              {t.timing ? <span style={{ color:"#334155" }}> · {t.timing}</span> : ""}
-              {t.severity ? <span style={{ color:"#475569" }}> · {t.severity}</span> : ""}
+              {str(t.description||t.name||t.title||t)}
+              {t.timing   ? <span style={{ color:"#334155" }}> · {str(t.timing)}</span>   : ""}
+              {t.severity ? <span style={{ color:"#475569" }}> · {str(t.severity)}</span> : ""}
             </div>
           ))}
         </div>
@@ -273,7 +293,7 @@ function IUCNPanel({ sciName }) {
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5 }}>Habitats</div>
           <div style={{ fontSize:12, color:"#94a3b8", lineHeight:1.7 }}>
-            {habitats.slice(0,6).map(h=>h.description||h.name||h.title).filter(Boolean).join(" · ")}
+            {habitats.slice(0,6).map(h=>str(h.description||h.name||h.title||h)).filter(Boolean).join(" · ")}
           </div>
         </div>
       )}
