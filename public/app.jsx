@@ -172,6 +172,26 @@ function PhotoGallery({ sciName }) {
   return <PhotoGalleryRaw photos={photos} sciName={sciName}/>;
 }
 
+class IUCNErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(e) { return { err: e.message }; }
+  render() {
+    if (this.state.err) return (
+      <div style={{ color:"#64748b", fontSize:12, padding:12, background:"#0a1628", borderRadius:6 }}>
+        ⚠ Render error: {this.state.err}
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+function safeStr(val) {
+  if (!val) return null;
+  if (typeof val === "string") return val;
+  if (typeof val === "object") return JSON.stringify(val).slice(0, 200);
+  return String(val);
+}
+
 function IUCNPanel({ sciName }) {
   const { data, loading, error } = useIUCN(sciName);
   if (loading) return <div style={{ color:"#475569", fontSize:12, textAlign:"center", padding:20 }}>Looking up IUCN data…</div>;
@@ -201,12 +221,16 @@ function IUCNPanel({ sciName }) {
   const threats  = a.threats_list || a.threats_table || [];
   const actions  = a.conservation_actions_list || a.conservation_actions_table || [];
 
-  const NarrBlock = ({label, text}) => !text ? null : (
-    <div style={{ marginTop:12 }}>
-      <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5 }}>{label}</div>
-      <div style={{ fontSize:12, color:"#64748b", lineHeight:1.7 }}>{text.slice(0,400)}{text.length>400?"…":""}</div>
-    </div>
-  );
+  const NarrBlock = ({label, text}) => {
+    const s = safeStr(text);
+    if (!s) return null;
+    return (
+      <div style={{ marginTop:12 }}>
+        <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5 }}>{label}</div>
+        <div style={{ fontSize:12, color:"#64748b", lineHeight:1.7 }}>{s.slice(0,600)}{s.length>600?"…":""}</div>
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -384,7 +408,7 @@ function SpeciesPanel({ sp, onClose, onSelectSsp }) {
       </div>
       <div style={{ flex:1, overflowY:"auto", padding:16 }}>
         {tab==="photos" && <PhotoGallery sciName={sp.sci}/>}
-        {tab==="iucn"   && <IUCNPanel   sciName={sp.sci}/>}
+        {tab==="iucn"   && <IUCNErrorBoundary><IUCNPanel sciName={sp.sci}/></IUCNErrorBoundary>}
         {tab==="mdd"    && <MDDPanel    sp={sp}/>}
         {tab==="ssp"    && <SubspeciesPanel sp={sp} onSelectSsp={onSelectSsp}/>}
       </div>
