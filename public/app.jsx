@@ -67,6 +67,18 @@ function useINat(sciName) {
   return state;
 }
 
+// Expand abbreviated MDD subspecies name to full trinomial for iNat search
+// e.g. "T. a. acanthion" + "Tachyglossus aculeatus" -> "Tachyglossus aculeatus acanthion"
+function expandSspName(abbrev, parentSci) {
+  const parts = (parentSci||"").trim().split(" ");
+  if (parts.length < 2) return abbrev;
+  const [genus, species] = parts;
+  const tokens = abbrev.trim().split(" ");
+  if (tokens.length >= 3 && !abbrev.includes(".")) return abbrev;
+  const epithet = [...tokens].reverse().find(t => !t.includes("."));
+  return epithet ? `${genus} ${species} ${epithet}` : abbrev;
+}
+
 function Badge({ status, large }) {
   const m = SM[status] || SM.NE;
   return <span style={{ background: m.c+"22", color: m.c, border: `1px solid ${m.c}55`, borderRadius: 4, padding: large?"3px 10px":"2px 6px", fontSize: large?12:10, fontWeight:700, fontFamily:"monospace", whiteSpace:"nowrap" }}>{status||"NE"}</span>;
@@ -288,8 +300,9 @@ function SubspeciesDetailPanel({ ssp, onClose, onOpenParent }) {
   // ssp = { name: "T. a. acanthion", parentSp: {sci, com, st, ...} }
   const { name, parentSp } = ssp;
 
-  // iNat search uses full trinomial if available, otherwise genus+species+subsp
-  const { photos, loading } = useINat(name);
+  // Expand abbreviated MDD name to full trinomial for iNat search
+  const fullName = expandSspName(name, parentSp.sci);
+  const { photos, loading } = useINat(fullName);
 
   return (
     <div style={{ position:"fixed", right:0, top:0, bottom:0, width:370, background:"#0a1220", borderLeft:"1px solid #0f2040", display:"flex", flexDirection:"column", zIndex:101, boxShadow:"-16px 0 48px #00000099" }}>
@@ -326,21 +339,21 @@ function SubspeciesDetailPanel({ ssp, onClose, onOpenParent }) {
         {loading && (
           <div style={{ textAlign:"center", padding:32, color:"#475569" }}>
             <div style={{ fontSize:32 }}>📸</div>
-            <div style={{ fontSize:12, marginTop:8 }}>Searching iNaturalist for <span style={{ fontStyle:"italic" }}>{name}</span>…</div>
+            <div style={{ fontSize:12, marginTop:8 }}>Searching iNaturalist for <span style={{ fontStyle:"italic" }}>{fullName}</span>…</div>
           </div>
         )}
         {!loading && photos.length === 0 && (
           <div style={{ textAlign:"center", padding:32 }}>
             <div style={{ fontSize:32, marginBottom:8 }}>🔍</div>
             <div style={{ fontSize:13, color:"#334155", marginBottom:8 }}>No CC0 photos found for</div>
-            <div style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:14, color:"#64748b", marginBottom:16 }}>{name}</div>
+            <div style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:14, color:"#64748b", marginBottom:16 }}>{fullName}</div>
             <div style={{ fontSize:11, color:"#1e293b", lineHeight:1.7 }}>
               Subspecies records on iNaturalist are often filed under the parent species.<br/>
               <span onClick={onOpenParent} style={{ color:"#7dd3fc", cursor:"pointer" }}>View parent species photos →</span>
             </div>
           </div>
         )}
-        {!loading && photos.length > 0 && <PhotoGalleryRaw photos={photos} sciName={name}/>}
+        {!loading && photos.length > 0 && <PhotoGalleryRaw photos={photos} sciName={fullName}/>}
       </div>
 
       <div style={{ padding:"7px 14px", borderTop:"1px solid #0f172a", fontSize:9, color:"#1e293b", display:"flex", justifyContent:"space-between" }}>
