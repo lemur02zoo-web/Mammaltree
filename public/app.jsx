@@ -198,11 +198,12 @@ function IUCNPanel({ sciName }) {
   if (error)   return <div style={{ color:"#64748b", fontSize:12, padding:12, background:"#0a1628", borderRadius:6, lineHeight:1.6 }}>ℹ {error}</div>;
   if (!data)   return null;
 
-  // assessment fields are often {description:{en:"..."}, code:"..."} objects
   const a   = data.assessment || {};
   const t   = data.taxon || {};
+  const doc = a.documentation || {};
+  const sup = a.supplementary_info || {};
 
-  // Helper: extract string from {description:{en:"..."}, code:"..."} or plain string
+  // Helper: extract string from {description:{en:"..."}} or plain string
   const str = (v) => {
     if (!v) return null;
     if (typeof v === "string") return v;
@@ -213,33 +214,34 @@ function IUCNPanel({ sciName }) {
     return null;
   };
 
-  const cat    = str(a.red_list_category);
-  const catCode = (a.red_list_category || {}).code || cat;
-  const trend  = str(a.population_trend);
-  const sisId  = t.sis_id || t.taxon_id;
-  const sisUrl = sisId ? `https://www.iucnredlist.org/species/${sisId}` : (a.url || null);
+  // Strip HTML tags from narrative text
+  const stripHtml = (s) => s ? s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : null;
 
-  // Narrative text fields — may be plain strings or {en:"..."} objects
-  const getText = (v) => {
-    if (!v) return null;
-    if (typeof v === "string") return v;
-    if (v.en) return v.en;
-    return null;
-  };
+  const catCode = (a.red_list_category || {}).code;
+  const trend   = str(a.population_trend);
+  const sisId   = t.sis_id;
+  const sisUrl  = a.url || (sisId ? `https://www.iucnredlist.org/species/${sisId}` : null);
+
+  // Narratives are all inside a.documentation
   const narratives = {
-    rationale:    getText(a.rationale),
-    geographic:   getText(a.geographic_range),
-    population:   getText(a.population),
-    habitat:      getText(a.habitat),
-    threats:      getText(a.threats_text || a.threat),
-    conservation: getText(a.conservation_actions_text || a.conservation_actions),
-    use_trade:    getText(a.use_trade),
+    rationale:    stripHtml(doc.rationale),
+    population:   stripHtml(doc.population),
+    habitat:      stripHtml(doc.habitats),
+    threats:      stripHtml(doc.threats),
+    conservation: stripHtml(doc.measures),
+    use_trade:    stripHtml(doc.use_trade),
+    range:        stripHtml(doc.range),
   };
 
   // Structured arrays
   const habitats = Array.isArray(a.habitats) ? a.habitats : [];
   const threats  = Array.isArray(a.threats)  ? a.threats  : [];
-  const actions  = Array.isArray(a.conservation_actions) ? a.conservation_actions : [];
+
+  // Population estimate from supplementary_info
+  const popSize  = sup.population_size;
+  const genLen   = sup.generational_length ? `${parseFloat(sup.generational_length).toFixed(1)} yrs` : null;
+  const eoo      = sup.estimated_extent_of_occurence
+    ? `${Math.round(parseFloat(sup.estimated_extent_of_occurence)).toLocaleString()} km²` : null;
 
   const NarrBlock = ({label, text}) => {
     const s = safeStr(text);
@@ -261,17 +263,12 @@ function IUCNPanel({ sciName }) {
           {a.year_published && <span style={{ color:"#475569", marginLeft:8, fontSize:11 }}>({a.year_published})</span>}
         </div>
       )}
-      <InfoRow label="Population trend"  value={trend} />
-      <InfoRow label="Criteria"          value={a.criteria} />
-      <InfoRow label="Population size"   value={a.population_size ? String(a.population_size) : null} />
-      {(a.generation_length_min || a.generation_length_max) && (
-        <InfoRow label="Generation length"
-          value={a.generation_length_min === a.generation_length_max
-            ? `${a.generation_length_min} yrs`
-            : `${a.generation_length_min||"?"}–${a.generation_length_max||"?"} yrs`} />
-      )}
-      <InfoRow label="No. of locations"     value={a.no_of_locations ? String(a.no_of_locations) : null} />
-      <InfoRow label="No. of subpopulations" value={a.no_of_subpopulations ? String(a.no_of_subpopulations) : null} />
+      <InfoRow label="Population trend"     value={trend} />
+      <InfoRow label="Criteria"             value={a.criteria} />
+      <InfoRow label="Population size"      value={popSize ? String(popSize) : null} />
+      <InfoRow label="Generation length"    value={genLen} />
+      <InfoRow label="Extent of occurrence" value={eoo} />
+      <InfoRow label="No. of locations"     value={sup.number_of_locations ? String(sup.number_of_locations) : null} />
       {(a.possibly_extinct || a.possibly_extinct_in_the_wild) && (
         <InfoRow label="Possibly extinct" value={a.possibly_extinct_in_the_wild ? "⚠ In the wild" : "⚠ Yes"} />
       )}
@@ -279,11 +276,11 @@ function IUCNPanel({ sciName }) {
       {threats.length>0 && (
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Main threats</div>
-          {threats.slice(0,5).map((t,i)=>(
+          {threats.slice(0,6).map((t,i)=>(
             <div key={i} style={{ fontSize:12, color:"#94a3b8", padding:"4px 0", borderBottom:"1px solid #0a1628" }}>
-              {str(t.description||t.name||t.title||t)}
-              {t.timing   ? <span style={{ color:"#334155" }}> · {str(t.timing)}</span>   : ""}
-              {t.severity ? <span style={{ color:"#475569" }}> · {str(t.severity)}</span> : ""}
+              {str(t.description)}
+              {t.scope    ? <span style={{ color:"#475569" }}> · {t.scope}</span>    : ""}
+              {t.severity ? <span style={{ color:"#334155" }}> · {t.severity}</span> : ""}
             </div>
           ))}
         </div>
@@ -292,18 +289,21 @@ function IUCNPanel({ sciName }) {
       {habitats.length>0 && (
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:5 }}>Habitats</div>
-          <div style={{ fontSize:12, color:"#94a3b8", lineHeight:1.7 }}>
-            {habitats.slice(0,6).map(h=>str(h.description||h.name||h.title||h)).filter(Boolean).join(" · ")}
-          </div>
+          {habitats.filter(h=>h.suitability==="Suitable"||h.majorImportance==="Yes").slice(0,6).map((h,i)=>(
+            <div key={i} style={{ fontSize:12, color:"#94a3b8", padding:"2px 0" }}>
+              {str(h.description)}
+              {h.majorImportance==="Yes" ? <span style={{ color:"#475569" }}> ★</span> : ""}
+            </div>
+          ))}
         </div>
       )}
 
-      <NarrBlock label="Rationale"          text={narratives.rationale} />
-      <NarrBlock label="Population"         text={narratives.population} />
-      <NarrBlock label="Habitat & Ecology"  text={narratives.habitat} />
-      <NarrBlock label="Threats"            text={narratives.threats} />
-      <NarrBlock label="Conservation"       text={narratives.conservation} />
-      <NarrBlock label="Geographic range"   text={narratives.geographic} />
+      <NarrBlock label="Rationale"         text={narratives.rationale} />
+      <NarrBlock label="Population"        text={narratives.population} />
+      <NarrBlock label="Habitat & Ecology" text={narratives.habitat} />
+      <NarrBlock label="Threats"           text={narratives.threats} />
+      <NarrBlock label="Conservation"      text={narratives.conservation} />
+      <NarrBlock label="Use & Trade"       text={narratives.use_trade} />
 
       {/* Assessed subspecies */}
       {data.subspecies_accounts?.length > 0 && (
@@ -442,12 +442,11 @@ function SpeciesPanel({ sp, onClose, onSelectSsp }) {
 
 // ── Subspecies detail panel ────────────────────────────────────────────────
 function SubspeciesDetailPanel({ ssp, onClose, onOpenParent }) {
-  // ssp = { name: "T. a. acanthion", parentSp: {sci, com, st, ...} }
   const { name, parentSp } = ssp;
-
-  // Expand abbreviated MDD name to full trinomial for iNat search
   const fullName = expandSspName(name, parentSp.sci);
   const { photos, loading } = useINat(fullName);
+  const [tab, setTab] = useState("photos");
+  const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"]];
 
   return (
     <div style={{ position:"fixed", right:0, top:0, bottom:0, width:370, background:"#0a1220", borderLeft:"1px solid #0f2040", display:"flex", flexDirection:"column", zIndex:101, boxShadow:"-16px 0 48px #00000099" }}>
@@ -455,7 +454,6 @@ function SubspeciesDetailPanel({ ssp, onClose, onOpenParent }) {
       <div style={{ padding:"18px 18px 12px", borderBottom:"1px solid #0f172a" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
           <div style={{ flex:1, minWidth:0 }}>
-            {/* Breadcrumb back to species */}
             <div onClick={onOpenParent} style={{ fontSize:11, color:"#1e3a5f", fontFamily:"monospace", marginBottom:6, cursor:"pointer", display:"flex", alignItems:"center", gap:4 }}>
               <span style={{ fontSize:13 }}>←</span>
               <span style={{ fontStyle:"italic" }}>{parentSp.sci}</span>
@@ -472,33 +470,38 @@ function SubspeciesDetailPanel({ ssp, onClose, onOpenParent }) {
         </div>
       </div>
 
-      {/* Tab label */}
-      <div style={{ padding:"8px 14px 6px", borderBottom:"1px solid #0f172a", display:"flex", alignItems:"center", gap:6 }}>
-        <span style={{ fontSize:14 }}>📸</span>
-        <span style={{ fontSize:11, color:"#475569", textTransform:"uppercase", letterSpacing:"0.05em" }}>CC0 Photos</span>
-        <span style={{ fontSize:10, color:"#1e293b", marginLeft:"auto" }}>iNaturalist · research grade</span>
+      {/* Tabs */}
+      <div style={{ display:"flex", borderBottom:"1px solid #0f172a" }}>
+        {tabs.map(([id,icon,label])=>(
+          <button key={id} onClick={()=>setTab(id)} style={{ flex:1, padding:"8px 4px", background:"none", border:"none", borderBottom: tab===id ? "2px solid #3b82f6" : "2px solid transparent", color: tab===id ? "#93c5fd" : "#334155", fontSize:11, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:4 }}>
+            <span>{icon}</span><span style={{ textTransform:"uppercase", letterSpacing:"0.05em" }}>{label}</span>
+          </button>
+        ))}
       </div>
 
-      {/* Photos */}
+      {/* Content */}
       <div style={{ flex:1, overflowY:"auto", padding:16 }}>
-        {loading && (
-          <div style={{ textAlign:"center", padding:32, color:"#475569" }}>
-            <div style={{ fontSize:32 }}>📸</div>
-            <div style={{ fontSize:12, marginTop:8 }}>Searching iNaturalist for <span style={{ fontStyle:"italic" }}>{fullName}</span>…</div>
-          </div>
-        )}
-        {!loading && photos.length === 0 && (
-          <div style={{ textAlign:"center", padding:32 }}>
-            <div style={{ fontSize:32, marginBottom:8 }}>🔍</div>
-            <div style={{ fontSize:13, color:"#334155", marginBottom:8 }}>No CC0 photos found for</div>
-            <div style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:14, color:"#64748b", marginBottom:16 }}>{fullName}</div>
-            <div style={{ fontSize:11, color:"#1e293b", lineHeight:1.7 }}>
-              Subspecies records on iNaturalist are often filed under the parent species.<br/>
-              <span onClick={onOpenParent} style={{ color:"#7dd3fc", cursor:"pointer" }}>View parent species photos →</span>
+        {tab === "photos" && <>
+          {loading && (
+            <div style={{ textAlign:"center", padding:32, color:"#475569" }}>
+              <div style={{ fontSize:32 }}>📸</div>
+              <div style={{ fontSize:12, marginTop:8 }}>Searching iNaturalist for <span style={{ fontStyle:"italic" }}>{fullName}</span>…</div>
             </div>
-          </div>
-        )}
-        {!loading && photos.length > 0 && <PhotoGalleryRaw photos={photos} sciName={fullName}/>}
+          )}
+          {!loading && photos.length === 0 && (
+            <div style={{ textAlign:"center", padding:32 }}>
+              <div style={{ fontSize:32, marginBottom:8 }}>🔍</div>
+              <div style={{ fontSize:13, color:"#334155", marginBottom:8 }}>No CC0 photos found for</div>
+              <div style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:14, color:"#64748b", marginBottom:16 }}>{fullName}</div>
+              <div style={{ fontSize:11, color:"#1e293b", lineHeight:1.7 }}>
+                Subspecies records on iNaturalist are often filed under the parent species.<br/>
+                <span onClick={onOpenParent} style={{ color:"#7dd3fc", cursor:"pointer" }}>View parent species photos →</span>
+              </div>
+            </div>
+          )}
+          {!loading && photos.length > 0 && <PhotoGalleryRaw photos={photos} sciName={fullName}/>}
+        </>}
+        {tab === "iucn" && <IUCNErrorBoundary><IUCNPanel sciName={fullName}/></IUCNErrorBoundary>}
       </div>
 
       <div style={{ padding:"7px 14px", borderTop:"1px solid #0f172a", fontSize:9, color:"#1e293b", display:"flex", justifyContent:"space-between" }}>
