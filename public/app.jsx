@@ -503,7 +503,7 @@ function SubspeciesPanel({ sp, onSelectSsp, taxon }) {
 function SpeciesPanel({ sp, onClose, onSelectSsp, taxon }) {
   const [tab, setTab] = useState("photos");
   const ssps = liveSsp(sp.ssp);
-  const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"],["mdd","📋","MDD"],
+  const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"],["mdd","📋",taxon==="birds"?"AviList":"MDD"],
     ...(ssps.length?[["ssp","🔬","Subspecies"]]:[])]
 
   // Fetch IUCN to get live status for header badge
@@ -546,7 +546,7 @@ function SpeciesPanel({ sp, onClose, onSelectSsp, taxon }) {
       <div style={{ flex:1, overflowY:"auto", padding:16 }}>
         {tab==="photos" && <PhotoGallery sciName={sp.sci}/>}
         {tab==="iucn"   && <IUCNErrorBoundary><IUCNPanel sciName={sp.sci}/></IUCNErrorBoundary>}
-        {tab==="mdd"    && <MDDPanel    sp={sp}/>}
+        {tab==="mdd"    && <MDDPanel    sp={sp} taxon={taxon}/>}
         {tab==="ssp"    && <SubspeciesPanel sp={sp} onSelectSsp={onSelectSsp}/>}
       </div>
       <div style={{ padding:"7px 14px", borderTop:"1px solid #0f172a", fontSize:9, color:"#1e293b", display:"flex", justifyContent:"space-between" }}>
@@ -802,7 +802,7 @@ const TAXA = {
     file: "/birds_full.json",
     subtitle: d => `AviList 2025 · ${d.toLocaleString()} species · iNaturalist CC0`,
     credits: [
-      "Lepage, D., Rahbek, C. et al. (2025). AviList: the global avian checklist. v2025. avilist.org",
+      "AviList Core Team. 2025. AviList: The Global Avian Checklist, v2025. https://doi.org/10.2173/avilist.v2025",
       "IUCN 2025. IUCN Red List of Threatened Species. Version 2025-2. www.iucnredlist.org"
     ],
     hasRealms: false,
