@@ -126,14 +126,15 @@ function useINat(sciName) {
         }
         if (cancelled) return;
 
-        // Step 2: fetch observations by exact taxon_id, excluding descendant taxa
+        // Step 2: fetch observations
+        // For subspecies: pin rank exactly so only that ssp is shown (not the whole species)
+        // For species: no rank pin, so observations identified to any subspecies are included
         const isSsp = sciName.trim().split(" ").length >= 3;
         let obsUrl;
         if (taxonId) {
-          const rank = isSsp ? "subspecies" : "species";
-          obsUrl = `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}&lrank=${rank}&hrank=${rank}&quality_grade=research&license=cc0&photos=true&per_page=8&order=votes&order_by=votes`;
+          const rankPin = isSsp ? "&lrank=subspecies&hrank=subspecies" : "";
+          obsUrl = `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}${rankPin}&quality_grade=research&license=cc0&photos=true&per_page=8&order=votes&order_by=votes`;
         } else {
-          // Fallback: taxon_name search (less precise)
           obsUrl = `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}&quality_grade=research&license=cc0&photos=true&per_page=8&order=votes&order_by=votes`;
         }
 
@@ -142,9 +143,12 @@ function useINat(sciName) {
 
         const imgs = [];
         (obsData.results || []).forEach(obs => {
-          // Extra safety: verify the observation taxon name matches exactly
-          const obsName = obs.taxon?.name || "";
-          if (obsName.toLowerCase() !== sciName.toLowerCase()) return;
+          // For subspecies: verify obs taxon name matches exactly to prevent bleed from parent
+          // For species: accept any observation under that taxon (incl. subspecies-level IDs)
+          if (isSsp) {
+            const obsName = obs.taxon?.name || "";
+            if (obsName.toLowerCase() !== sciName.toLowerCase()) return;
+          }
           (obs.photos || []).forEach(ph => {
             if ((ph.license_code || "").toLowerCase() === "cc0")
               imgs.push({ url: ph.url?.replace("square","medium"), thumb: ph.url, attr: ph.attribution || "", link: `https://www.inaturalist.org/observations/${obs.id}`, place: obs.place_guess || "" });
