@@ -2,7 +2,7 @@
 // Mammals: mdd_full.json (MDD v2.4) | Birds: birds_full.json (AviList 2025)
 // Photos: iNaturalist CC0 (live) | Conservation: IUCN Red List API v4
 
-const { useState, useEffect, useCallback, useMemo } = React;
+const { useState, useEffect, useCallback, useMemo, useRef } = React;
 
 const SM = {
   LC: { c: "#4ade80", l: "Least Concern" },
@@ -100,68 +100,87 @@ function useIUCN(sciName) {
 
 // Per-session cache for iNat taxon ID lookups
 const inatTaxonCache = {};
+const INAT_PAGE_SIZE = 6;
+
+async function resolveInatTaxon(sciName) {
+  if (sciName in inatTaxonCache) return inatTaxonCache[sciName];
+  const isSsp = sciName.trim().split(" ").length >= 3;
+  const rank = isSsp ? "subspecies" : "species";
+  const taxaData = await fetch(`https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(sciName)}&rank=${rank}&per_page=10`).then(r => r.json());
+  const exact = (taxaData.results || []).find(t => t.name.toLowerCase() === sciName.toLowerCase());
+  const id = exact ? exact.id : null;
+  inatTaxonCache[sciName] = id;
+  return id;
+}
+
+function obsToImgs(results, sciName) {
+  const isSsp = sciName.trim().split(" ").length >= 3;
+  const imgs = [];
+  (results || []).forEach(obs => {
+    if (isSsp) {
+      const obsName = obs.taxon?.name || "";
+      if (obsName.toLowerCase() !== sciName.toLowerCase()) return;
+    }
+    (obs.photos || []).forEach(ph => {
+      if ((ph.license_code || "").toLowerCase() === "cc0")
+        imgs.push({ url: ph.url?.replace("square","medium"), thumb: ph.url, attr: ph.attribution || "", link: `https://www.inaturalist.org/observations/${obs.id}`, place: obs.place_guess || "" });
+    });
+  });
+  return imgs;
+}
 
 function useINat(sciName) {
-  const [state, setState] = useState({ photos: [], loading: false });
+  const [photos, setPhotos]           = useState([]);
+  const [loading, setLoading]         = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore]         = useState(false);
+  const [page, setPage]               = useState(1);
+  const taxonIdRef                    = useRef(null);
+
   useEffect(() => {
     if (!sciName) return;
     let cancelled = false;
-    setState({ photos: [], loading: true });
-
-    const run = async () => {
+    setPhotos([]); setPage(1); setHasMore(false); setLoading(true);
+    const isSsp = sciName.trim().split(" ").length >= 3;
+    (async () => {
       try {
-        // Step 1: resolve exact taxon ID
-        let taxonId = inatTaxonCache[sciName];
-        if (taxonId === undefined) {
-          const isSsp = sciName.trim().split(" ").length >= 3;
-          const rank = isSsp ? "subspecies" : "species";
-          const taxaUrl = `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(sciName)}&rank=${rank}&per_page=10`;
-          const taxaData = await fetch(taxaUrl).then(r => r.json());
-          const exact = (taxaData.results || []).find(t =>
-            t.name.toLowerCase() === sciName.toLowerCase()
-          );
-          taxonId = exact ? exact.id : null;
-          inatTaxonCache[sciName] = taxonId;
-        }
+        const taxonId = await resolveInatTaxon(sciName);
         if (cancelled) return;
-
-        // Step 2: fetch observations
-        // For subspecies: pin rank exactly so only that ssp is shown (not the whole species)
-        // For species: no rank pin, so observations identified to any subspecies are included
-        const isSsp = sciName.trim().split(" ").length >= 3;
-        let obsUrl;
-        if (taxonId) {
-          const rankPin = isSsp ? "&lrank=subspecies&hrank=subspecies" : "";
-          obsUrl = `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}${rankPin}&quality_grade=research&license=cc0&photos=true&per_page=8&order=votes&order_by=votes`;
-        } else {
-          obsUrl = `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}&quality_grade=research&license=cc0&photos=true&per_page=8&order=votes&order_by=votes`;
-        }
-
-        const obsData = await fetch(obsUrl).then(r => r.json());
+        taxonIdRef.current = taxonId;
+        const rankPin = (taxonId && isSsp) ? "&lrank=subspecies&hrank=subspecies" : "";
+        const base = taxonId
+          ? `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}${rankPin}`
+          : `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}`;
+        const data = await fetch(`${base}&quality_grade=research&license=cc0&photos=true&per_page=${INAT_PAGE_SIZE}&page=1&order=votes&order_by=votes`).then(r => r.json());
         if (cancelled) return;
-
-        const imgs = [];
-        (obsData.results || []).forEach(obs => {
-          // For subspecies: verify obs taxon name matches exactly to prevent bleed from parent
-          // For species: accept any observation under that taxon (incl. subspecies-level IDs)
-          if (isSsp) {
-            const obsName = obs.taxon?.name || "";
-            if (obsName.toLowerCase() !== sciName.toLowerCase()) return;
-          }
-          (obs.photos || []).forEach(ph => {
-            if ((ph.license_code || "").toLowerCase() === "cc0")
-              imgs.push({ url: ph.url?.replace("square","medium"), thumb: ph.url, attr: ph.attribution || "", link: `https://www.inaturalist.org/observations/${obs.id}`, place: obs.place_guess || "" });
-          });
-        });
-        setState({ photos: imgs.slice(0, 6), loading: false });
-      } catch {
-        if (!cancelled) setState({ photos: [], loading: false });
-      }
-    };
-    run();
+        setPhotos(obsToImgs(data.results, sciName));
+        setHasMore((data.total_results || 0) > INAT_PAGE_SIZE);
+        setLoading(false);
+      } catch { if (!cancelled) setLoading(false); }
+    })();
     return () => { cancelled = true; };
   }, [sciName]);
-  return state;
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !sciName) return;
+    setLoadingMore(true);
+    const nextPage = page + 1;
+    const isSsp = sciName.trim().split(" ").length >= 3;
+    const taxonId = taxonIdRef.current;
+    const rankPin = (taxonId && isSsp) ? "&lrank=subspecies&hrank=subspecies" : "";
+    const base = taxonId
+      ? `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}${rankPin}`
+      : `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}`;
+    try {
+      const data = await fetch(`${base}&quality_grade=research&license=cc0&photos=true&per_page=${INAT_PAGE_SIZE}&page=${nextPage}&order=votes&order_by=votes`).then(r => r.json());
+      setPhotos(prev => [...prev, ...obsToImgs(data.results, sciName)]);
+      setPage(nextPage);
+      setHasMore((data.total_results || 0) > nextPage * INAT_PAGE_SIZE);
+    } catch {}
+    setLoadingMore(false);
+  }, [sciName, page, loadingMore]);
+
+  return { photos, loading, loadingMore, hasMore, loadMore };
 }
 
 // Expand abbreviated MDD subspecies name to full trinomial for iNat search
@@ -191,9 +210,12 @@ function InfoRow({ label, value, mono }) {
   );
 }
 
-function PhotoGalleryRaw({ photos, sciName }) {
+function PhotoGalleryRaw({ photos, sciName, hasMore, loadMore, loadingMore }) {
   const [idx, setIdx] = useState(0);
-  const p = photos[idx];
+  // Keep selected index in bounds when more photos load in
+  const safeIdx = Math.min(idx, photos.length - 1);
+  const p = photos[safeIdx];
+  if (!p) return null;
   return (
     <div>
       <div style={{ position:"relative", borderRadius:10, overflow:"hidden", marginBottom:8, background:"#0a0a0a" }}>
@@ -201,21 +223,35 @@ function PhotoGalleryRaw({ photos, sciName }) {
         <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"linear-gradient(transparent,#000000aa)", padding:"20px 10px 8px", fontSize:10, color:"#ccc" }}>
           CC0 · {p.attr.replace("(c) ","© ")}{p.place?` · ${p.place}`:""} · <a href={p.link} target="_blank" rel="noreferrer" style={{ color:"#7dd3fc", textDecoration:"none" }}>iNaturalist ↗</a>
         </div>
+        {photos.length>1 && (
+          <div style={{ position:"absolute", top:"50%", left:0, right:0, transform:"translateY(-50%)", display:"flex", justifyContent:"space-between", pointerEvents:"none" }}>
+            <button onClick={e=>{e.stopPropagation();setIdx(i=>Math.max(0,i-1));}} style={{ pointerEvents:"auto", background:"#00000066", border:"none", color:"#fff", fontSize:18, padding:"4px 10px", cursor:"pointer", borderRadius:"0 6px 6px 0", opacity:safeIdx>0?1:0 }}>‹</button>
+            <button onClick={e=>{e.stopPropagation();setIdx(i=>Math.min(photos.length-1,i+1));}} style={{ pointerEvents:"auto", background:"#00000066", border:"none", color:"#fff", fontSize:18, padding:"4px 10px", cursor:"pointer", borderRadius:"6px 0 0 6px", opacity:safeIdx<photos.length-1?1:0 }}>›</button>
+          </div>
+        )}
       </div>
-      {photos.length>1 && (
-        <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-          {photos.map((ph,i)=><img key={i} src={ph.thumb} alt="" onClick={()=>setIdx(i)} style={{ width:46, height:46, objectFit:"cover", borderRadius:6, cursor:"pointer", border:`2px solid ${i===idx?"#7dd3fc":"transparent"}`, opacity:i===idx?1:0.5, transition:"all 0.15s" }}/>)}
-        </div>
-      )}
+      <div style={{ display:"flex", gap:5, flexWrap:"wrap", alignItems:"center" }}>
+        {photos.map((ph,i)=>(
+          <img key={i} src={ph.thumb} alt="" onClick={()=>setIdx(i)}
+            style={{ width:46, height:46, objectFit:"cover", borderRadius:6, cursor:"pointer", border:`2px solid ${i===safeIdx?"#7dd3fc":"transparent"}`, opacity:i===safeIdx?1:0.5, transition:"all 0.15s" }}/>
+        ))}
+        {hasMore && (
+          <button onClick={loadMore} disabled={loadingMore}
+            style={{ height:46, padding:"0 10px", background:"#07101f", border:"1px solid #1e3a5f", borderRadius:6, color:loadingMore?"#334155":"#7dd3fc", fontSize:11, cursor:loadingMore?"default":"pointer", flexShrink:0 }}>
+            {loadingMore ? "…" : "More ›"}
+          </button>
+        )}
+      </div>
+      <div style={{ marginTop:6, fontSize:10, color:"#1e3a5f" }}>{safeIdx+1} / {photos.length}{hasMore?" (more available)":""}</div>
     </div>
   );
 }
 
 function PhotoGallery({ sciName }) {
-  const { photos, loading } = useINat(sciName);
+  const { photos, loading, loadingMore, hasMore, loadMore } = useINat(sciName);
   if (loading) return <div style={{ textAlign:"center", padding:32, color:"#475569" }}><div style={{ fontSize:32 }}>📸</div><div style={{ fontSize:12, marginTop:8 }}>Loading CC0 photos…</div></div>;
   if (!photos.length) return <div style={{ textAlign:"center", padding:32, color:"#334155", fontSize:13 }}>No CC0 photos found on iNaturalist.</div>;
-  return <PhotoGalleryRaw photos={photos} sciName={sciName}/>;
+  return <PhotoGalleryRaw photos={photos} sciName={sciName} hasMore={hasMore} loadMore={loadMore} loadingMore={loadingMore}/>;
 }
 
 class IUCNErrorBoundary extends React.Component {
@@ -562,7 +598,7 @@ function SubspeciesDetailPanel({ ssp, onClose, onOpenParent, taxon }) {
   const { name, parentSp } = ssp;
   // Birds: ssp names are already full trinomials; mammals: need expansion from abbreviation
   const fullName = taxon === "birds" ? name : expandSspName(name, parentSp.sci);
-  const { photos, loading } = useINat(fullName);
+  const { photos, loading, loadingMore, hasMore, loadMore } = useINat(fullName);
   const [tab, setTab] = useState("photos");
   const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"]];
 
@@ -628,7 +664,7 @@ function SubspeciesDetailPanel({ ssp, onClose, onOpenParent, taxon }) {
               </div>
             </div>
           )}
-          {!loading && photos.length > 0 && <PhotoGalleryRaw photos={photos} sciName={fullName}/>}
+          {!loading && photos.length > 0 && <PhotoGalleryRaw photos={photos} sciName={fullName} hasMore={hasMore} loadMore={loadMore} loadingMore={loadingMore}/>}
         </>}
         {tab === "iucn" && <IUCNErrorBoundary><IUCNPanel sciName={fullName} taxon={taxon}/></IUCNErrorBoundary>}
       </div>
@@ -691,6 +727,20 @@ function GenusNode({ name, spp, onSelect, selected, showSsp, onSelectSsp }) {
   const [open, setOpen] = useState(false);
   const [hov, setHov] = useState(false);
   const threatened = useMemo(()=>spp.filter(s=>["CR","EN","VU"].includes(s.st)).length,[spp]);
+
+  // Group by subgenus if >1 subgenus present in this genus
+  const subgenera = useMemo(()=>{
+    const sgens = new Set(spp.map(s=>s.sgen).filter(Boolean));
+    if (sgens.size < 2) return null;
+    const groups = {};
+    spp.forEach(s => {
+      const sg = s.sgen || "(unplaced)";
+      if (!groups[sg]) groups[sg] = [];
+      groups[sg].push(s);
+    });
+    return groups;
+  }, [spp]);
+
   return (
     <div>
       <div onClick={()=>setOpen(o=>!o)} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
@@ -699,6 +749,31 @@ function GenusNode({ name, spp, onSelect, selected, showSsp, onSelectSsp }) {
         <span style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:13, color:"#64748b" }}>{name}</span>
         <span style={{ fontSize:10, color:"#1e293b" }}>({spp.length})</span>
         {threatened>0 && <span style={{ fontSize:9, color:"#fb923c", marginLeft:2 }}>⚠ {threatened}</span>}
+      </div>
+      {open && (subgenera
+        ? Object.entries(subgenera).sort(([a],[b])=>a.localeCompare(b)).map(([sg, sgSpp])=>(
+            <SubgenusNode key={sg} name={sg} spp={sgSpp} onSelect={onSelect} selected={selected} showSsp={showSsp} onSelectSsp={onSelectSsp}/>
+          ))
+        : spp.map((sp,i)=>(
+            <SpeciesRow key={i} sp={sp} onClick={()=>onSelect(sp)} isSelected={selected?.sci===sp.sci} showSsp={showSsp} onSelectSsp={onSelectSsp}/>
+          ))
+      )}
+    </div>
+  );
+}
+
+function SubgenusNode({ name, spp, onSelect, selected, showSsp, onSelectSsp }) {
+  const [open, setOpen] = useState(false);
+  const [hov, setHov] = useState(false);
+  const threatened = useMemo(()=>spp.filter(s=>["CR","EN","VU"].includes(s.st)).length,[spp]);
+  return (
+    <div>
+      <div onClick={()=>setOpen(o=>!o)} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+        style={{ display:"flex", alignItems:"center", gap:6, padding:"3px 10px 3px 28px", cursor:"pointer", borderRadius:6, background:hov?"#070f1d":"transparent" }}>
+        <span style={{ color:"#1e293b", fontSize:9, width:10, textAlign:"center" }}>{open?"▾":"▸"}</span>
+        <span style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic", fontSize:12, color:"#475569" }}>({name})</span>
+        <span style={{ fontSize:9, color:"#1e293b" }}>{spp.length}</span>
+        {threatened>0 && <span style={{ fontSize:9, color:"#fb923c" }}>⚠ {threatened}</span>}
       </div>
       {open && spp.map((sp,i)=>(
         <SpeciesRow key={i} sp={sp} onClick={()=>onSelect(sp)} isSelected={selected?.sci===sp.sci} showSsp={showSsp} onSelectSsp={onSelectSsp}/>
@@ -715,6 +790,29 @@ function FamilyNode({ name, genera, onSelect, selected, showSsp, onSelectSsp }) 
     Object.values(genera).forEach(spp=>spp.forEach(s=>{total++;if(["CR","EN","VU"].includes(s.st))threatened++;}));
     return {total,threatened};
   },[genera]);
+
+  // Group genera by subfamily if >1 subfamily present in this family
+  const subfamilies = useMemo(()=>{
+    const allSpp = Object.values(genera).flat();
+    const sfams = new Set(allSpp.map(s=>s.sfam).filter(Boolean));
+    if (sfams.size < 2) return null;
+    // Map genus → subfamily (use majority vote per genus)
+    const genSfam = {};
+    Object.entries(genera).forEach(([gen, spp]) => {
+      const counts = {};
+      spp.forEach(s => { if (s.sfam) counts[s.sfam] = (counts[s.sfam]||0) + 1; });
+      const best = Object.entries(counts).sort(([,a],[,b])=>b-a)[0];
+      genSfam[gen] = best ? best[0] : "(unplaced)";
+    });
+    const groups = {};
+    Object.entries(genera).forEach(([gen, spp]) => {
+      const sf = genSfam[gen];
+      if (!groups[sf]) groups[sf] = {};
+      groups[sf][gen] = spp;
+    });
+    return groups;
+  }, [genera]);
+
   return (
     <div style={{ marginBottom:1 }}>
       <div onClick={()=>setOpen(o=>!o)} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
@@ -723,6 +821,35 @@ function FamilyNode({ name, genera, onSelect, selected, showSsp, onSelectSsp }) 
         <span style={{ fontSize:13, fontWeight:600, color:"#7dd3fc" }}>{name}</span>
         <span style={{ fontSize:10, color:"#1e293b", marginLeft:4 }}>{total} spp</span>
         {threatened>0 && <span style={{ fontSize:9, color:"#f87171", background:"#1a0505", padding:"1px 5px", borderRadius:3 }}>{threatened} threatened</span>}
+      </div>
+      {open && (subfamilies
+        ? Object.entries(subfamilies).sort(([a],[b])=>a.localeCompare(b)).map(([sf, sfGenera])=>(
+            <SubfamilyNode key={sf} name={sf} genera={sfGenera} onSelect={onSelect} selected={selected} showSsp={showSsp} onSelectSsp={onSelectSsp}/>
+          ))
+        : Object.entries(genera).sort(([a],[b])=>a.localeCompare(b)).map(([genus,spp])=>(
+            <GenusNode key={genus} name={genus} spp={spp} onSelect={onSelect} selected={selected} showSsp={showSsp} onSelectSsp={onSelectSsp}/>
+          ))
+      )}
+    </div>
+  );
+}
+
+function SubfamilyNode({ name, genera, onSelect, selected, showSsp, onSelectSsp }) {
+  const [open, setOpen] = useState(false);
+  const [hov, setHov] = useState(false);
+  const { total, threatened } = useMemo(()=>{
+    let total=0, threatened=0;
+    Object.values(genera).forEach(spp=>spp.forEach(s=>{total++;if(["CR","EN","VU"].includes(s.st))threatened++;}));
+    return {total,threatened};
+  },[genera]);
+  return (
+    <div style={{ marginLeft:8, marginBottom:1 }}>
+      <div onClick={()=>setOpen(o=>!o)} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+        style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 10px 4px 10px", cursor:"pointer", borderRadius:6, background:hov?"#070f1d":"transparent" }}>
+        <span style={{ color:"#1e293b", fontSize:10, width:12, textAlign:"center" }}>{open?"▾":"▸"}</span>
+        <span style={{ fontSize:12, fontWeight:500, color:"#38bdf8" }}>{name}</span>
+        <span style={{ fontSize:10, color:"#1e293b" }}>{total} spp</span>
+        {threatened>0 && <span style={{ fontSize:9, color:"#f87171" }}>⚠ {threatened}</span>}
       </div>
       {open && Object.entries(genera).sort(([a],[b])=>a.localeCompare(b)).map(([genus,spp])=>(
         <GenusNode key={genus} name={genus} spp={spp} onSelect={onSelect} selected={selected} showSsp={showSsp} onSelectSsp={onSelectSsp}/>
