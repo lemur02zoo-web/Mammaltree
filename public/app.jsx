@@ -1,7 +1,6 @@
-// Mammal Tree of Life — app.jsx
-// Data: mdd_full.json (MDD v2.4, all fields)
-// Photos: iNaturalist CC0 (live)
-// Conservation: iucn_enriched.json (static, pre-fetched via fetch_iucn_data.py)
+// Tree of Life — app.jsx
+// Mammals: mdd_full.json (MDD v2.4) | Birds: birds_full.json (AviList 2025)
+// Photos: iNaturalist CC0 (live) | Conservation: IUCN Red List API v4
 
 const { useState, useEffect, useCallback, useMemo } = React;
 
@@ -239,7 +238,7 @@ function safeStr(val) {
   return String(val);
 }
 
-function IUCNPanel({ sciName }) {
+function IUCNPanel({ sciName, taxon }) {
   const { data, loading, error } = useIUCN(sciName);
   if (loading) return <div style={{ color:"#475569", fontSize:12, textAlign:"center", padding:20 }}>Looking up IUCN data…</div>;
   if (error)   return <div style={{ color:"#64748b", fontSize:12, padding:12, background:"#0a1628", borderRadius:6, lineHeight:1.6 }}>ℹ {error}</div>;
@@ -413,44 +412,46 @@ function IUCNPanel({ sciName }) {
       {sisUrl && <a href={sisUrl} target="_blank" rel="noreferrer" style={{ display:"inline-block", marginTop:14, color:"#7dd3fc", fontSize:12, textDecoration:"none" }}>View on IUCN Red List ↗</a>}
 
       <div style={{ marginTop:16, paddingTop:12, borderTop:"1px solid #0f172a", fontSize:10, color:"#1e3a5f", lineHeight:1.7 }}>
-        <div style={{ marginBottom:3 }}>IUCN 2025. <span style={{ fontStyle:"italic" }}>IUCN Red List of Threatened Species.</span> Version 2025-2. www.iucnredlist.org</div>
-        <div>Mammal Diversity Database (2026). MDD v2.4. Zenodo. doi:10.5281/zenodo.18135819</div>
+        {(TAXA[taxon]||TAXA.mammals).credits.map((c,i)=><div key={i} style={{ marginBottom:2 }}>{c}</div>)}
       </div>
     </div>
   );
 }
 
-function MDDPanel({ sp }) {
+function MDDPanel({ sp, taxon }) {
+  const isBird = taxon === "birds";
+  const cfg = TAXA[taxon] || TAXA.mammals;
   return (
     <div>
       {sp.auth && (
         <div style={{ marginBottom:14, padding:"10px 14px", background:"#0a1628", borderRadius:8 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>Taxonomic Authority</div>
           <div style={{ fontFamily:"monospace", fontSize:13, color:"#94a3b8" }}>{sp.auth}</div>
-          {sp.orig && sp.orig.replace(/_/g," ")!==sp.sci && (
+          {!isBird && sp.orig && sp.orig.replace(/_/g," ")!==sp.sci && (
             <div style={{ fontSize:11, color:"#334155", marginTop:4 }}>Originally: <span style={{ fontStyle:"italic" }}>{sp.orig.replace(/_/g," ")}</span></div>
           )}
         </div>
       )}
-      <InfoRow label="MDD ID"       value={sp.mdd_id} mono />
+      {!isBird && <InfoRow label="MDD ID"    value={sp.mdd_id} mono />}
+      {isBird  && <InfoRow label="eBird code" value={sp.sp_code} mono />}
       <InfoRow label="Other names"  value={sp.com2} />
-      <InfoRow label="Subgenus"     value={sp.sgen?`(${sp.sgen})`:null} />
-      <InfoRow label="Subfamily"    value={sp.sfam} />
-      <InfoRow label="Tribe"        value={sp.tribe} />
+      {!isBird && <InfoRow label="Subgenus"  value={sp.sgen?`(${sp.sgen})`:null} />}
+      {!isBird && <InfoRow label="Subfamily" value={sp.sfam} />}
+      {!isBird && <InfoRow label="Tribe"     value={sp.tribe} />}
       {sp.dist && (
         <div style={{ marginTop:12 }}>
-          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Distribution</div>
+          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Range</div>
           <div style={{ fontSize:12, color:"#64748b", lineHeight:1.6 }}>{sp.dist}</div>
         </div>
       )}
-      <InfoRow label="Countries" value={sp.countries} />
-      <InfoRow label="Realm"     value={sp.realms} />
+      {!isBird && <InfoRow label="Countries" value={sp.countries} />}
+      {!isBird && <InfoRow label="Realm"     value={sp.realms} />}
       <div style={{ marginTop:10, display:"flex", gap:6, flexWrap:"wrap" }}>
         {sp.dom  && <span style={{ fontSize:10, color:"#fbbf24", background:"#1c1000", border:"1px solid #fbbf2444", borderRadius:4, padding:"2px 7px" }}>🏠 Domestic</span>}
         {sp.flag && <span style={{ fontSize:10, color:"#f87171", background:"#1a0505", border:"1px solid #f8717144", borderRadius:4, padding:"2px 7px" }}>⚑ Flagged</span>}
         {sp.ex   && <span style={{ fontSize:10, color:"#94a3b8", background:"#0f172a", border:"1px solid #94a3b844", borderRadius:4, padding:"2px 7px" }}>† Extinct</span>}
       </div>
-      {sp.synonyms?.length>0 && (
+      {!isBird && sp.synonyms?.length>0 && (
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Nominal names / synonyms</div>
           <div style={{ fontSize:11, color:"#334155", fontFamily:"monospace", lineHeight:1.8 }}>
@@ -461,24 +462,31 @@ function MDDPanel({ sp }) {
       )}
       {sp.tax_notes && (
         <div style={{ marginTop:12 }}>
-          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Taxonomy notes</div>
-          <div style={{ fontSize:11, color:"#334155", lineHeight:1.6 }}>{sp.tax_notes.slice(0,400)}{sp.tax_notes.length>400?"…":""}</div>
+          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>{isBird ? "Taxonomic decision" : "Taxonomy notes"}</div>
+          <div style={{ fontSize:11, color:"#334155", lineHeight:1.6 }}>{sp.tax_notes.slice(0,600)}{sp.tax_notes.length>600?"…":""}</div>
+        </div>
+      )}
+      {isBird && (
+        <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:5 }}>
+          {sp.botw_url && <a href={sp.botw_url} target="_blank" rel="noreferrer" style={{ color:"#7dd3fc", fontSize:12, textDecoration:"none" }}>Birds of the World ↗</a>}
+          {sp.bl_url   && <a href={sp.bl_url}   target="_blank" rel="noreferrer" style={{ color:"#7dd3fc", fontSize:12, textDecoration:"none" }}>BirdLife Datazone ↗</a>}
         </div>
       )}
       <div style={{ marginTop:16, paddingTop:12, borderTop:"1px solid #0f172a", fontSize:10, color:"#1e3a5f", lineHeight:1.7 }}>
-        <div>Mammal Diversity Database (2026). MDD v2.4. Zenodo. doi:10.5281/zenodo.18135819</div>
+        {cfg.credits.map((c,i)=><div key={i} style={{ marginBottom:2 }}>{c}</div>)}
       </div>
     </div>
   );
 }
 
-function SubspeciesPanel({ sp, onSelectSsp }) {
+function SubspeciesPanel({ sp, onSelectSsp, taxon }) {
   const [hov, setHov] = useState(null);
   const ssps = liveSsp(sp.ssp);
-  if (!ssps.length) return <div style={{ textAlign:"center", padding:32, color:"#334155", fontSize:13 }}>No subspecies recorded in MDD v2.4.</div>;
+  const srcLabel = taxon==="birds" ? "AviList 2025" : "MDD v2.4";
+  if (!ssps.length) return <div style={{ textAlign:"center", padding:32, color:"#334155", fontSize:13 }}>No subspecies recorded in {srcLabel}.</div>;
   return (
     <div>
-      <div style={{ fontSize:11, color:"#334155", marginBottom:12 }}>{ssps.length} subspecies recognised in MDD v2.4 · click to view photos</div>
+      <div style={{ fontSize:11, color:"#334155", marginBottom:12 }}>{ssps.length} subspecies recognised in {srcLabel} · click to view photos</div>
       {ssps.map((name,i)=>(
         <div key={i} onClick={()=>onSelectSsp({name, parentSp:sp})}
           onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
@@ -492,7 +500,7 @@ function SubspeciesPanel({ sp, onSelectSsp }) {
   );
 }
 
-function SpeciesPanel({ sp, onClose, onSelectSsp }) {
+function SpeciesPanel({ sp, onClose, onSelectSsp, taxon }) {
   const [tab, setTab] = useState("photos");
   const ssps = liveSsp(sp.ssp);
   const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"],["mdd","📋","MDD"],
@@ -542,7 +550,7 @@ function SpeciesPanel({ sp, onClose, onSelectSsp }) {
         {tab==="ssp"    && <SubspeciesPanel sp={sp} onSelectSsp={onSelectSsp}/>}
       </div>
       <div style={{ padding:"7px 14px", borderTop:"1px solid #0f172a", fontSize:9, color:"#1e293b", display:"flex", justifyContent:"space-between" }}>
-        <span>MDD v2.4 · iNaturalist CC0</span><span>IUCN Red List v4</span>
+        <span>{taxon==="birds"?"AviList 2025":"MDD v2.4"} · iNaturalist CC0</span><span>IUCN Red List v4</span>
       </div>
     </div>
   );
@@ -550,9 +558,10 @@ function SpeciesPanel({ sp, onClose, onSelectSsp }) {
 
 
 // ── Subspecies detail panel ────────────────────────────────────────────────
-function SubspeciesDetailPanel({ ssp, onClose, onOpenParent }) {
+function SubspeciesDetailPanel({ ssp, onClose, onOpenParent, taxon }) {
   const { name, parentSp } = ssp;
-  const fullName = expandSspName(name, parentSp.sci);
+  // Birds: ssp names are already full trinomials; mammals: need expansion from abbreviation
+  const fullName = taxon === "birds" ? name : expandSspName(name, parentSp.sci);
   const { photos, loading } = useINat(fullName);
   const [tab, setTab] = useState("photos");
   const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"]];
@@ -621,11 +630,11 @@ function SubspeciesDetailPanel({ ssp, onClose, onOpenParent }) {
           )}
           {!loading && photos.length > 0 && <PhotoGalleryRaw photos={photos} sciName={fullName}/>}
         </>}
-        {tab === "iucn" && <IUCNErrorBoundary><IUCNPanel sciName={fullName}/></IUCNErrorBoundary>}
+        {tab === "iucn" && <IUCNErrorBoundary><IUCNPanel sciName={fullName} taxon={taxon}/></IUCNErrorBoundary>}
       </div>
 
       <div style={{ padding:"7px 14px", borderTop:"1px solid #0f172a", fontSize:9, color:"#1e293b", display:"flex", justifyContent:"space-between" }}>
-        <span>MDD v2.4 subspecies</span><span>iNaturalist CC0</span>
+        <span>{taxon==="birds"?"AviList 2025":"MDD v2.4"} subspecies</span><span>iNaturalist CC0</span>
       </div>
     </div>
   );
@@ -776,21 +785,51 @@ function SearchResults({ query, allSpecies, onSelect }) {
   );
 }
 
+// ── Taxon dataset config ──────────────────────────────────────────────────
+const TAXA = {
+  mammals: {
+    key: "mammals", icon: "🦣", label: "Mammals",
+    file: "/mdd_full.json",
+    subtitle: d => `MDD v2.4 · ${d.toLocaleString()} species · iNaturalist CC0`,
+    credits: [
+      "Mammal Diversity Database (2026). MDD v2.4. Zenodo. doi:10.5281/zenodo.18135819",
+      "IUCN 2025. IUCN Red List of Threatened Species. Version 2025-2. www.iucnredlist.org"
+    ],
+    hasRealms: true,
+  },
+  birds: {
+    key: "birds", icon: "🐦", label: "Birds",
+    file: "/birds_full.json",
+    subtitle: d => `AviList 2025 · ${d.toLocaleString()} species · iNaturalist CC0`,
+    credits: [
+      "Lepage, D., Rahbek, C. et al. (2025). AviList: the global avian checklist. v2025. avilist.org",
+      "IUCN 2025. IUCN Red List of Threatened Species. Version 2025-2. www.iucnredlist.org"
+    ],
+    hasRealms: false,
+  },
+};
+
 // ── Main App ───────────────────────────────────────────────────────────────
 function App() {
+  const [taxon, setTaxon]       = useState("mammals");
   const [tree, setTree]         = useState(null);
   const [allSp, setAllSp]       = useState([]);
   const [counts, setCounts]     = useState({});
   const [selected, setSelected]     = useState(null);
-  const [selectedSsp, setSelectedSsp] = useState(null); // {name, parentSp}
+  const [selectedSsp, setSelectedSsp] = useState(null);
   const [search, setSearch]           = useState("");
   const [filter, setFilter]     = useState(null);
   const [realmFilter, setRealmFilter] = useState(null);
   const [showSsp, setShowSsp]   = useState(true);
   const [loadErr, setLoadErr]   = useState(null);
+  const [loading, setLoading]   = useState(false);
 
-  useEffect(()=>{
-    fetch("/mdd_full.json")
+  const loadTaxon = useCallback((key) => {
+    const cfg = TAXA[key];
+    setTree(null); setAllSp([]); setCounts({}); setSelected(null);
+    setSelectedSsp(null); setSearch(""); setFilter(null); setRealmFilter(null);
+    setLoadErr(null); setLoading(true);
+    fetch(cfg.file)
       .then(r=>{ if(!r.ok)throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(data=>{
         const t={}, c={total:0};
@@ -806,14 +845,21 @@ function App() {
             });
           });
         });
-        setTree(t);
-        setCounts(c);
-        const flat=data.sp.slice().sort((a,b)=>(a.sort||0)-(b.sort||0));
-        setAllSp(flat);
+        setTree(t); setCounts(c);
+        setAllSp(data.sp.slice().sort((a,b)=>(a.sort||0)-(b.sort||0)));
+        setLoading(false);
         document.getElementById("splash").style.display="none";
       })
-      .catch(e=>{setLoadErr(e.message);document.getElementById("splash").style.display="none";});
-  },[]);
+      .catch(e=>{setLoadErr(e.message); setLoading(false); document.getElementById("splash").style.display="none";});
+  }, []);
+
+  useEffect(()=>{ loadTaxon("mammals"); },[loadTaxon]);
+
+  const switchTaxon = useCallback((key)=>{
+    if(key===taxon) return;
+    setTaxon(key);
+    loadTaxon(key);
+  },[taxon, loadTaxon]);
 
   const onSelect = useCallback(sp=>{
     setSelectedSsp(null);
@@ -826,74 +872,97 @@ function App() {
   },[]);
 
   const openParentFromSsp = useCallback(()=>{
-    if(selectedSsp){
-      setSelected(selectedSsp.parentSp);
-      setSelectedSsp(null);
-    }
+    if(selectedSsp){ setSelected(selectedSsp.parentSp); setSelectedSsp(null); }
   },[selectedSsp]);
 
   const realms = useMemo(()=>{
+    if(!TAXA[taxon].hasRealms) return [];
     const r=new Set();
     allSp.forEach(sp=>{if(sp.realms)sp.realms.split("|").forEach(x=>r.add(x.trim()));});
     return [...r].filter(x=>x&&x!=="NA").sort();
-  },[allSp]);
+  },[allSp, taxon]);
+
+  const cfg = TAXA[taxon];
 
   if(loadErr) return <div style={{ background:"#040d1a", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", color:"#f87171", fontFamily:"monospace", padding:24 }}>⚠ {loadErr}</div>;
-  if(!tree)   return null;
 
-  const orders = Object.keys(tree).sort((a,b)=>{
+  const orders = tree ? Object.keys(tree).sort((a,b)=>{
     const mn=o=>Math.min(...Object.values(tree[o]).flatMap(f=>Object.values(f).flatMap(spp=>spp.map(s=>s.sort||9999))));
     return mn(a)-mn(b);
-  });
+  }) : [];
+
+  const panelWidth = (selected || selectedSsp) ? "calc(100vw - 370px)" : "100vw";
 
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif", background:"#040d1a", minHeight:"100vh", color:"#e2e8f0" }}>
-      <div style={{ position:"fixed", left:0, top:0, bottom:0, width:selected?"calc(100vw - 370px)":"100vw", display:"flex", flexDirection:"column", transition:"width 0.25s ease" }}>
+      <div style={{ position:"fixed", left:0, top:0, bottom:0, width:panelWidth, display:"flex", flexDirection:"column", transition:"width 0.25s ease" }}>
 
         {/* Header */}
         <div style={{ padding:"14px 14px 10px", background:"#040d1a", borderBottom:"1px solid #0a1628" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-            <span style={{ fontSize:24 }}>🌳</span>
-            <div>
-              <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:17, letterSpacing:"-0.5px", color:"#f1f5f9" }}>Mammal Tree of Life</div>
-              <div style={{ fontSize:10, color:"#1e3a5f" }}>MDD v2.4 · {counts.total?.toLocaleString()} species · iNaturalist CC0</div>
+
+            {/* Taxon switcher */}
+            <div style={{ display:"flex", background:"#070f1d", borderRadius:8, border:"1px solid #0f2040", overflow:"hidden", flexShrink:0 }}>
+              {Object.values(TAXA).map(t=>(
+                <button key={t.key} onClick={()=>switchTaxon(t.key)}
+                  style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 10px", background:taxon===t.key?"#0f2040":"transparent", border:"none", color:taxon===t.key?"#93c5fd":"#334155", fontSize:12, cursor:"pointer", fontWeight:taxon===t.key?700:400, transition:"all 0.15s" }}>
+                  <span style={{ fontSize:15 }}>{t.icon}</span>
+                  <span>{t.label}</span>
+                </button>
+              ))}
             </div>
-            <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6 }}>
-              <span style={{ fontSize:10, color:"#334155" }}>Subspecies</span>
+
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:16, letterSpacing:"-0.5px", color:"#f1f5f9" }}>Tree of Life</div>
+              <div style={{ fontSize:10, color:"#1e3a5f" }}>{loading ? "Loading…" : cfg.subtitle(counts.total||0)}</div>
+            </div>
+
+            <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+              <span style={{ fontSize:10, color:"#334155" }}>Ssp</span>
               <div onClick={()=>setShowSsp(s=>!s)} style={{ width:32, height:18, borderRadius:9, background:showSsp?"#1e3a5f":"#0f172a", border:"1px solid #1e3a5f", cursor:"pointer", position:"relative", transition:"all 0.2s" }}>
                 <div style={{ position:"absolute", top:2, left:showSsp?14:2, width:12, height:12, borderRadius:"50%", background:showSsp?"#7dd3fc":"#334155", transition:"all 0.2s" }}/>
               </div>
             </div>
           </div>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search species, common name, synonym, or subspecies…"
+
+          <input value={search} onChange={e=>setSearch(e.target.value)}
+            placeholder={`Search ${cfg.label.toLowerCase()}, common name, or subspecies…`}
             style={{ width:"100%", padding:"7px 12px", background:"#07101f", border:"1px solid #0f2040", borderRadius:7, color:"#e2e8f0", fontSize:13, outline:"none", marginBottom:8, boxSizing:"border-box" }}/>
           <div style={{ display:"flex", gap:3, flexWrap:"wrap", marginBottom:6 }}>
             {Object.entries(SM).map(([code,m])=>(
               <button key={code} onClick={()=>setFilter(f=>f===code?null:code)} style={{ background:filter===code?m.c+"33":"transparent", border:`1px solid ${filter===code?m.c:"#0f2040"}`, color:filter===code?m.c:"#334155", borderRadius:4, padding:"2px 6px", fontSize:10, cursor:"pointer", fontWeight:700, fontFamily:"monospace", transition:"all 0.1s" }}>{code}</button>
             ))}
           </div>
-          <select value={realmFilter||""} onChange={e=>setRealmFilter(e.target.value||null)}
-            style={{ width:"100%", padding:"5px 8px", background:"#07101f", border:"1px solid #0f2040", borderRadius:6, color:realmFilter?"#e2e8f0":"#334155", fontSize:11, outline:"none" }}>
-            <option value="">All biogeographic realms</option>
-            {realms.map(r=><option key={r} value={r}>{r}</option>)}
-          </select>
+          {realms.length>0 && (
+            <select value={realmFilter||""} onChange={e=>setRealmFilter(e.target.value||null)}
+              style={{ width:"100%", padding:"5px 8px", background:"#07101f", border:"1px solid #0f2040", borderRadius:6, color:realmFilter?"#e2e8f0":"#334155", fontSize:11, outline:"none" }}>
+              <option value="">All biogeographic realms</option>
+              {realms.map(r=><option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
         </div>
 
         {/* Stats */}
         <div style={{ padding:"5px 12px", background:"#040c18", borderBottom:"1px solid #0a1628", display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
-          {Object.entries(SM).map(([code,m])=>counts[code]?(
-            <div key={code} style={{ display:"flex", alignItems:"center", gap:3, fontSize:10 }}>
-              <div style={{ width:7, height:7, borderRadius:2, background:m.c }}/>
-              <span style={{ color:m.c }}>{code} </span><span style={{ color:"#334155" }}>{counts[code]}</span>
-            </div>
-          ):null)}
+          {loading
+            ? <span style={{ fontSize:10, color:"#1e3a5f" }}>Loading dataset…</span>
+            : Object.entries(SM).map(([code,m])=>counts[code]?(
+              <div key={code} style={{ display:"flex", alignItems:"center", gap:3, fontSize:10 }}>
+                <div style={{ width:7, height:7, borderRadius:2, background:m.c }}/>
+                <span style={{ color:m.c }}>{code} </span><span style={{ color:"#334155" }}>{counts[code]}</span>
+              </div>
+            ):null)
+          }
         </div>
 
         {/* Tree */}
         <div style={{ flex:1, overflowY:"auto", padding:"6px 4px" }}>
-          {search
-            ? <SearchResults query={search} allSpecies={allSp} onSelect={onSelect}/>
-            : orders.map(o=><OrderNode key={o} name={o} families={tree[o]} onSelect={onSelect} selected={selected} filterStatus={filter} filterRealm={realmFilter} showSsp={showSsp} onSelectSsp={onSelectSsp}/>)
+          {loading
+            ? <div style={{ textAlign:"center", padding:48, color:"#1e3a5f", fontSize:13 }}>Loading {cfg.label}…</div>
+            : !tree ? null
+            : search
+              ? <SearchResults query={search} allSpecies={allSp} onSelect={onSelect}/>
+              : orders.map(o=><OrderNode key={o} name={o} families={tree[o]} onSelect={onSelect} selected={selected} filterStatus={filter} filterRealm={realmFilter} showSsp={showSsp} onSelectSsp={onSelectSsp}/>)
           }
         </div>
 
@@ -908,8 +977,8 @@ function App() {
         </div>
       </div>
 
-      {selected    && <SpeciesPanel sp={selected} onClose={()=>setSelected(null)} onSelectSsp={onSelectSsp}/>}
-      {selectedSsp && <SubspeciesDetailPanel ssp={selectedSsp} onClose={()=>setSelectedSsp(null)} onOpenParent={openParentFromSsp}/>}
+      {selected    && <SpeciesPanel sp={selected} onClose={()=>setSelected(null)} onSelectSsp={onSelectSsp} taxon={taxon}/>}
+      {selectedSsp && <SubspeciesDetailPanel ssp={selectedSsp} onClose={()=>setSelectedSsp(null)} onOpenParent={openParentFromSsp} taxon={taxon}/>}
     </div>
   );
 }
