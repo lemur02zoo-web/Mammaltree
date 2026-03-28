@@ -99,24 +99,64 @@ function useIUCN(sciName) {
   return state;
 }
 
+// Per-session cache for iNat taxon ID lookups
+const inatTaxonCache = {};
+
 function useINat(sciName) {
   const [state, setState] = useState({ photos: [], loading: false });
   useEffect(() => {
     if (!sciName) return;
+    let cancelled = false;
     setState({ photos: [], loading: true });
-    fetch(`https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}&quality_grade=research&license=cc0&photos=true&per_page=8&order=votes&order_by=votes`)
-      .then(r => r.json())
-      .then(d => {
+
+    const run = async () => {
+      try {
+        // Step 1: resolve exact taxon ID
+        let taxonId = inatTaxonCache[sciName];
+        if (taxonId === undefined) {
+          const isSsp = sciName.trim().split(" ").length >= 3;
+          const rank = isSsp ? "subspecies" : "species";
+          const taxaUrl = `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(sciName)}&rank=${rank}&per_page=10`;
+          const taxaData = await fetch(taxaUrl).then(r => r.json());
+          const exact = (taxaData.results || []).find(t =>
+            t.name.toLowerCase() === sciName.toLowerCase()
+          );
+          taxonId = exact ? exact.id : null;
+          inatTaxonCache[sciName] = taxonId;
+        }
+        if (cancelled) return;
+
+        // Step 2: fetch observations by exact taxon_id, excluding descendant taxa
+        const isSsp = sciName.trim().split(" ").length >= 3;
+        let obsUrl;
+        if (taxonId) {
+          const rank = isSsp ? "subspecies" : "species";
+          obsUrl = `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}&lrank=${rank}&hrank=${rank}&quality_grade=research&license=cc0&photos=true&per_page=8&order=votes&order_by=votes`;
+        } else {
+          // Fallback: taxon_name search (less precise)
+          obsUrl = `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}&quality_grade=research&license=cc0&photos=true&per_page=8&order=votes&order_by=votes`;
+        }
+
+        const obsData = await fetch(obsUrl).then(r => r.json());
+        if (cancelled) return;
+
         const imgs = [];
-        (d.results || []).forEach(obs =>
+        (obsData.results || []).forEach(obs => {
+          // Extra safety: verify the observation taxon name matches exactly
+          const obsName = obs.taxon?.name || "";
+          if (obsName.toLowerCase() !== sciName.toLowerCase()) return;
           (obs.photos || []).forEach(ph => {
-            if ((ph.license_code||"").toLowerCase()==="cc0")
-              imgs.push({ url: ph.url?.replace("square","medium"), thumb: ph.url, attr: ph.attribution||"", link: `https://www.inaturalist.org/observations/${obs.id}`, place: obs.place_guess||"" });
-          })
-        );
-        setState({ photos: imgs.slice(0,6), loading: false });
-      })
-      .catch(() => setState({ photos: [], loading: false }));
+            if ((ph.license_code || "").toLowerCase() === "cc0")
+              imgs.push({ url: ph.url?.replace("square","medium"), thumb: ph.url, attr: ph.attribution || "", link: `https://www.inaturalist.org/observations/${obs.id}`, place: obs.place_guess || "" });
+          });
+        });
+        setState({ photos: imgs.slice(0, 6), loading: false });
+      } catch {
+        if (!cancelled) setState({ photos: [], loading: false });
+      }
+    };
+    run();
+    return () => { cancelled = true; };
   }, [sciName]);
   return state;
 }
