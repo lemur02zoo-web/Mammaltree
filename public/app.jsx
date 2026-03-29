@@ -125,31 +125,31 @@ function obsToImgs(results, sciName) {
   const nameLower = sciName.toLowerCase();
   const imgs = [];
   (results || []).forEach(obs => {
-    // Verify the observation belongs to the right taxon:
-    // - For subspecies pages: exact match only (prevents parent-species bleed)
-    // - For species pages: accept exact match OR any subspecies of this species
-    //   (obs.taxon.name may be "Bubo bubo bubo" which is still correct for the Bubo bubo page)
-    //   but reject genuinely different species (e.g. "Bubo virginianus")
     const obsName = (obs.taxon?.name || "").toLowerCase();
     if (isSsp) {
       if (obsName !== nameLower) return;
     } else {
-      // Accept: exact match, or trinomial starting with "genus species "
       if (obsName !== nameLower && !obsName.startsWith(nameLower + " ")) return;
     }
-    (obs.photos || []).forEach(ph => {
+    // faves_count is the best available proxy for photo quality on iNat —
+    // it reflects how many people found the observation noteworthy.
+    // First photo in an observation is the primary subject shot; subsequent
+    // photos (same obs) get a small penalty so they sort after the lead shot.
+    const faves = obs.faves_count || 0;
+    (obs.photos || []).forEach((ph, phIdx) => {
       if ((ph.license_code || "").toLowerCase() === "cc0")
         imgs.push({
-          url:   ph.url?.replace("square", "medium"),
-          thumb: ph.url,
-          attr:  ph.attribution || "",
-          link:  `https://www.inaturalist.org/observations/${obs.id}`,
-          place: obs.place_guess || "",
-          // quality_grade from parent obs — used for ordering
-          grade: obs.quality_grade === "research" ? 1 : 0,
+          url:    ph.url?.replace("square", "medium"),
+          thumb:  ph.url,
+          attr:   ph.attribution || "",
+          link:   `https://www.inaturalist.org/observations/${obs.id}`,
+          place:  obs.place_guess || "",
+          score:  faves - phIdx * 0.1,   // tiny penalty for non-lead photos
         });
     });
   });
+  // Sort descending by score so most-faved lead photos come first
+  imgs.sort((a, b) => b.score - a.score);
   return imgs;
 }
 
@@ -159,7 +159,9 @@ function buildObsUrl(sciName, taxonId, page) {
   const base = taxonId
     ? `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}${rankPin}`
     : `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}`;
-  return `${base}&quality_grade=research&license=cc0&photos=true&per_page=${INAT_OBS_PER_PAGE}&page=${page}&order=votes&order_by=votes`;
+  // order=faves returns most-favourited observations first — much better proxy
+  // for photo quality than order=votes (which measures ID agreement, not photo merit)
+  return `${base}&quality_grade=research&license=cc0&photos=true&per_page=${INAT_OBS_PER_PAGE}&page=${page}&order=faves&order_by=faves`;
 }
 
 function useINat(sciName) {
