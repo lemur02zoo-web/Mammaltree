@@ -109,13 +109,14 @@ async function resolveInatTaxon(sciName) {
   if (sciName in inatTaxonCache) return inatTaxonCache[sciName];
   const isSsp = sciName.trim().split(" ").length >= 3;
   const rank = isSsp ? "subspecies" : "species";
-  const taxaData = await fetch(
-    `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(sciName)}&rank=${rank}&per_page=10`
-  ).then(r => r.json());
+  const url = `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(sciName)}&rank=${rank}&per_page=10`;
+  const taxaData = await fetch(url).then(r => r.json());
+  console.log(`[iNat taxa] "${sciName}" results:`, (taxaData.results||[]).map(t=>({id:t.id,name:t.name,rank:t.rank})));
   const exact = (taxaData.results || []).find(
     t => t.name.toLowerCase() === sciName.toLowerCase()
   );
   const id = exact ? exact.id : null;
+  console.log(`[iNat taxa] resolved "${sciName}" → taxonId=${id}`);
   inatTaxonCache[sciName] = id;
   return id;
 }
@@ -124,12 +125,13 @@ function obsToImgs(results, sciName) {
   const isSsp = sciName.trim().split(" ").length >= 3;
   const nameLower = sciName.toLowerCase();
   const imgs = [];
+  console.log(`[iNat obs] "${sciName}" — ${results?.length} observations returned`);
   (results || []).forEach(obs => {
     const obsName = (obs.taxon?.name || "").toLowerCase();
-    if (isSsp) {
-      if (obsName !== nameLower) return;
-    } else {
-      if (obsName !== nameLower && !obsName.startsWith(nameLower + " ")) return;
+    const pass = isSsp ? obsName === nameLower : (obsName === nameLower || obsName.startsWith(nameLower + " "));
+    if (!pass) {
+      console.log(`[iNat obs]   SKIP obs ${obs.id}: taxon="${obs.taxon?.name}"`);
+      return;
     }
     // faves_count is the best available proxy for photo quality on iNat —
     // it reflects how many people found the observation noteworthy.
