@@ -109,62 +109,73 @@ async function resolveInatTaxon(sciName) {
   if (sciName in inatTaxonCache) return inatTaxonCache[sciName];
   const isSsp = sciName.trim().split(" ").length >= 3;
   const rank = isSsp ? "subspecies" : "species";
-  const url = `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(sciName)}&rank=${rank}&per_page=10`;
-  const taxaData = await fetch(url).then(r => r.json());
-  console.log(`[iNat taxa] "${sciName}" results:`, (taxaData.results||[]).map(t=>({id:t.id,name:t.name,rank:t.rank})));
-  const exact = (taxaData.results || []).find(
+
+  // First try: exact rank
+  let taxaData = await fetch(
+    `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(sciName)}&rank=${rank}&per_page=10`
+  ).then(r => r.json());
+  console.log(`[iNat taxa] "${sciName}" rank=${rank} results:`, (taxaData.results||[]).map(t=>({id:t.id,name:t.name,rank:t.rank})));
+
+  let exact = (taxaData.results || []).find(
     t => t.name.toLowerCase() === sciName.toLowerCase()
   );
+
+  // Second try: no rank filter — iNat sometimes classifies species under a
+  // different rank (e.g. complex, hybrid, or the nominate ssp takes the slot)
+  if (!exact) {
+    taxaData = await fetch(
+      `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(sciName)}&per_page=20`
+    ).then(r => r.json());
+    console.log(`[iNat taxa] "${sciName}" no-rank results:`, (taxaData.results||[]).map(t=>({id:t.id,name:t.name,rank:t.rank})));
+    exact = (taxaData.results || []).find(
+      t => t.name.toLowerCase() === sciName.toLowerCase()
+    );
+  }
+
   const id = exact ? exact.id : null;
-  console.log(`[iNat taxa] resolved "${sciName}" → taxonId=${id}`);
+  console.log(`[iNat taxa] resolved "${sciName}" → taxonId=${id} (rank=${exact?.rank})`);
   inatTaxonCache[sciName] = id;
   return id;
+}
+
+function buildObsUrl(sciName, taxonId, page) {
+  // Never fall back to taxon_name — it returns unrelated observations.
+  // If we have no taxonId, return null and show "not found".
+  if (!taxonId) return null;
+  const isSsp = sciName.trim().split(" ").length >= 3;
+  const rankPin = isSsp ? "&lrank=subspecies&hrank=subspecies" : "";
+  return `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}${rankPin}&quality_grade=research&license=cc0&photos=true&per_page=${INAT_OBS_PER_PAGE}&page=${page}&order=faves&order_by=faves`;
 }
 
 function obsToImgs(results, sciName) {
   const isSsp = sciName.trim().split(" ").length >= 3;
   const nameLower = sciName.toLowerCase();
   const imgs = [];
-  console.log(`[iNat obs] "${sciName}" — ${results?.length} observations returned`);
   (results || []).forEach(obs => {
     const obsName = (obs.taxon?.name || "").toLowerCase();
-    const pass = isSsp ? obsName === nameLower : (obsName === nameLower || obsName.startsWith(nameLower + " "));
-    if (!pass) {
-      console.log(`[iNat obs]   SKIP obs ${obs.id}: taxon="${obs.taxon?.name}"`);
-      return;
+    if (isSsp) {
+      if (obsName !== nameLower) return;
+    } else {
+      if (obsName !== nameLower && !obsName.startsWith(nameLower + " ")) return;
     }
-    // faves_count is the best available proxy for photo quality on iNat —
-    // it reflects how many people found the observation noteworthy.
-    // First photo in an observation is the primary subject shot; subsequent
-    // photos (same obs) get a small penalty so they sort after the lead shot.
     const faves = obs.faves_count || 0;
     (obs.photos || []).forEach((ph, phIdx) => {
       if ((ph.license_code || "").toLowerCase() === "cc0")
         imgs.push({
-          url:    ph.url?.replace("square", "medium"),
-          thumb:  ph.url,
-          attr:   ph.attribution || "",
-          link:   `https://www.inaturalist.org/observations/${obs.id}`,
-          place:  obs.place_guess || "",
-          score:  faves - phIdx * 0.1,   // tiny penalty for non-lead photos
+          url:   ph.url?.replace("square", "medium"),
+          thumb: ph.url,
+          attr:  ph.attribution || "",
+          link:  `https://www.inaturalist.org/observations/${obs.id}`,
+          place: obs.place_guess || "",
+          score: faves - phIdx * 0.1,
         });
     });
   });
-  // Sort descending by score so most-faved lead photos come first
   imgs.sort((a, b) => b.score - a.score);
   return imgs;
 }
 
-function buildObsUrl(sciName, taxonId, page) {
-  const isSsp = sciName.trim().split(" ").length >= 3;
-  const rankPin = (taxonId && isSsp) ? "&lrank=subspecies&hrank=subspecies" : "";
-  const base = taxonId
-    ? `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}${rankPin}`
-    : `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}`;
-  // order=faves returns most-favourited observations first — much better proxy
-  // for photo quality than order=votes (which measures ID agreement, not photo merit)
-  return `${base}&quality_grade=research&license=cc0&photos=true&per_page=${INAT_OBS_PER_PAGE}&page=${page}&order=faves&order_by=faves`;
-}
+
 
 function useINat(sciName) {
   const [photos, setPhotos]           = useState([]);
@@ -184,7 +195,9 @@ function useINat(sciName) {
         const taxonId = await resolveInatTaxon(sciName);
         if (cancelled) return;
         stateRef.current.taxonId = taxonId;
-        const data = await fetch(buildObsUrl(sciName, taxonId, 1)).then(r => r.json());
+        const url1 = buildObsUrl(sciName, taxonId, 1);
+        if (!url1) { setLoading(false); return; }
+        const data = await fetch(url1).then(r => r.json());
         if (cancelled) return;
         const imgs = obsToImgs(data.results, sciName);
         stateRef.current.totalObs = data.total_results || 0;
@@ -219,7 +232,9 @@ function useINat(sciName) {
         if (nextPage * INAT_OBS_PER_PAGE - INAT_OBS_PER_PAGE >= s.totalObs && s.buffer.length === 0) {
           setHasMore(false);
         } else {
-          const data = await fetch(buildObsUrl(sciName, s.taxonId, nextPage)).then(r => r.json());
+          const urlN = buildObsUrl(sciName, s.taxonId, nextPage);
+          if (!urlN) { setHasMore(false); setLoadingMore(false); return; }
+          const data = await fetch(urlN).then(r => r.json());
           s.obsPage = nextPage;
           const newImgs = [...s.buffer, ...obsToImgs(data.results, sciName)];
           const show = newImgs.slice(0, INAT_PHOTOS_PER_PAGE);
