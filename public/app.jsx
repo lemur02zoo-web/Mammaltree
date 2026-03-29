@@ -121,13 +121,22 @@ async function resolveInatTaxon(sciName) {
 }
 
 function obsToImgs(results, sciName) {
+  const isSsp = sciName.trim().split(" ").length >= 3;
+  const nameLower = sciName.toLowerCase();
   const imgs = [];
   (results || []).forEach(obs => {
-    // Always verify the observation's own taxon name matches exactly —
-    // this prevents related species bleeding through (e.g. Bubo virginianus
-    // appearing on the Bubo bubo page) whether querying species or subspecies.
-    const obsName = obs.taxon?.name || "";
-    if (obsName.toLowerCase() !== sciName.toLowerCase()) return;
+    // Verify the observation belongs to the right taxon:
+    // - For subspecies pages: exact match only (prevents parent-species bleed)
+    // - For species pages: accept exact match OR any subspecies of this species
+    //   (obs.taxon.name may be "Bubo bubo bubo" which is still correct for the Bubo bubo page)
+    //   but reject genuinely different species (e.g. "Bubo virginianus")
+    const obsName = (obs.taxon?.name || "").toLowerCase();
+    if (isSsp) {
+      if (obsName !== nameLower) return;
+    } else {
+      // Accept: exact match, or trinomial starting with "genus species "
+      if (obsName !== nameLower && !obsName.startsWith(nameLower + " ")) return;
+    }
     (obs.photos || []).forEach(ph => {
       if ((ph.license_code || "").toLowerCase() === "cc0")
         imgs.push({
