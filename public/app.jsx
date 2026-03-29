@@ -522,7 +522,9 @@ function IUCNPanel({ sciName, taxon }) {
 }
 
 function MDDPanel({ sp, taxon }) {
-  const isBird = taxon === "birds";
+  const isMammal  = taxon === "mammals";
+  const isBird    = taxon === "birds";
+  const isReptile = taxon === "reptiles";
   const cfg = TAXA[taxon] || TAXA.mammals;
   return (
     <div>
@@ -530,31 +532,32 @@ function MDDPanel({ sp, taxon }) {
         <div style={{ marginBottom:14, padding:"10px 14px", background:"#0a1628", borderRadius:8 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>Taxonomic Authority</div>
           <div style={{ fontFamily:"monospace", fontSize:13, color:"#94a3b8" }}>{sp.auth}</div>
-          {!isBird && sp.orig && sp.orig.replace(/_/g," ")!==sp.sci && (
+          {isMammal && sp.orig && sp.orig.replace(/_/g," ")!==sp.sci && (
             <div style={{ fontSize:11, color:"#334155", marginTop:4 }}>Originally: <span style={{ fontStyle:"italic" }}>{sp.orig.replace(/_/g," ")}</span></div>
           )}
         </div>
       )}
-      {!isBird && <InfoRow label="MDD ID"    value={sp.mdd_id} mono />}
-      {isBird  && <InfoRow label="eBird code" value={sp.sp_code} mono />}
+      {isMammal  && <InfoRow label="MDD ID"        value={sp.mdd_id} mono />}
+      {isBird    && <InfoRow label="eBird code"     value={sp.sp_code} mono />}
+      {isReptile && <InfoRow label="Reptile DB ID"  value={sp.mdd_id} mono />}
       <InfoRow label="Other names"  value={sp.com2} />
-      {!isBird && <InfoRow label="Subgenus"  value={sp.sgen?`(${sp.sgen})`:null} />}
-      {!isBird && <InfoRow label="Subfamily" value={sp.sfam} />}
-      {!isBird && <InfoRow label="Tribe"     value={sp.tribe} />}
+      {isMammal && <InfoRow label="Subgenus"  value={sp.sgen?`(${sp.sgen})`:null} />}
+      {isMammal && <InfoRow label="Subfamily" value={sp.sfam} />}
+      {isMammal && <InfoRow label="Tribe"     value={sp.tribe} />}
       {sp.dist && (
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Range</div>
           <div style={{ fontSize:12, color:"#64748b", lineHeight:1.6 }}>{sp.dist}</div>
         </div>
       )}
-      {!isBird && <InfoRow label="Countries" value={sp.countries} />}
-      {!isBird && <InfoRow label="Realm"     value={sp.realms} />}
+      {isMammal && <InfoRow label="Countries" value={sp.countries} />}
+      {isMammal && <InfoRow label="Realm"     value={sp.realms} />}
       <div style={{ marginTop:10, display:"flex", gap:6, flexWrap:"wrap" }}>
         {sp.dom  && <span style={{ fontSize:10, color:"#fbbf24", background:"#1c1000", border:"1px solid #fbbf2444", borderRadius:4, padding:"2px 7px" }}>🏠 Domestic</span>}
         {sp.flag && <span style={{ fontSize:10, color:"#f87171", background:"#1a0505", border:"1px solid #f8717144", borderRadius:4, padding:"2px 7px" }}>⚑ Flagged</span>}
         {sp.ex   && <span style={{ fontSize:10, color:"#94a3b8", background:"#0f172a", border:"1px solid #94a3b844", borderRadius:4, padding:"2px 7px" }}>† Extinct</span>}
       </div>
-      {!isBird && sp.synonyms?.length>0 && (
+      {isMammal && sp.synonyms?.length>0 && (
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Nominal names / synonyms</div>
           <div style={{ fontSize:11, color:"#334155", fontFamily:"monospace", lineHeight:1.8 }}>
@@ -565,7 +568,9 @@ function MDDPanel({ sp, taxon }) {
       )}
       {sp.tax_notes && (
         <div style={{ marginTop:12 }}>
-          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>{isBird ? "Taxonomic decision" : "Taxonomy notes"}</div>
+          <div style={{ fontSize:10, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>
+            {isBird ? "Taxonomic decision" : isReptile ? "Change since last release" : "Taxonomy notes"}
+          </div>
           <div style={{ fontSize:11, color:"#334155", lineHeight:1.6 }}>{sp.tax_notes.slice(0,600)}{sp.tax_notes.length>600?"…":""}</div>
         </div>
       )}
@@ -573,6 +578,11 @@ function MDDPanel({ sp, taxon }) {
         <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:5 }}>
           {sp.botw_url && <a href={sp.botw_url} target="_blank" rel="noreferrer" style={{ color:"#7dd3fc", fontSize:12, textDecoration:"none" }}>Birds of the World ↗</a>}
           {sp.bl_url   && <a href={sp.bl_url}   target="_blank" rel="noreferrer" style={{ color:"#7dd3fc", fontSize:12, textDecoration:"none" }}>BirdLife Datazone ↗</a>}
+        </div>
+      )}
+      {isReptile && sp.mdd_id && (
+        <div style={{ marginTop:12 }}>
+          <a href={`https://reptile-database.reptarium.cz/species?id=${sp.mdd_id}`} target="_blank" rel="noreferrer" style={{ color:"#7dd3fc", fontSize:12, textDecoration:"none" }}>Reptile Database ↗</a>
         </div>
       )}
       <div style={{ marginTop:16, paddingTop:12, borderTop:"1px solid #0f172a", fontSize:10, color:"#1e3a5f", lineHeight:1.7 }}>
@@ -585,7 +595,7 @@ function MDDPanel({ sp, taxon }) {
 function SubspeciesPanel({ sp, onSelectSsp, taxon }) {
   const [hov, setHov] = useState(null);
   const ssps = liveSsp(sp.ssp);
-  const srcLabel = taxon==="birds" ? "AviList 2025" : "MDD v2.4";
+  const srcLabel = taxon==="birds" ? "AviList 2025" : taxon==="reptiles" ? "Reptile Database 2026" : "MDD v2.4";
   if (!ssps.length) return <div style={{ textAlign:"center", padding:32, color:"#334155", fontSize:13 }}>No subspecies recorded in {srcLabel}.</div>;
   return (
     <div>
@@ -606,7 +616,7 @@ function SubspeciesPanel({ sp, onSelectSsp, taxon }) {
 function SpeciesPanel({ sp, onClose, onSelectSsp, taxon }) {
   const [tab, setTab] = useState("photos");
   const ssps = liveSsp(sp.ssp);
-  const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"],["mdd","📋",taxon==="birds"?"AviList":"MDD"],
+  const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"],["mdd","📋",taxon==="birds"?"AviList":taxon==="reptiles"?"ReptileDB":"MDD"],
     ...(ssps.length?[["ssp","🔬","Subspecies"]]:[])]
 
   // Fetch IUCN to get live status for header badge
@@ -653,7 +663,7 @@ function SpeciesPanel({ sp, onClose, onSelectSsp, taxon }) {
         {tab==="ssp"    && <SubspeciesPanel sp={sp} onSelectSsp={onSelectSsp}/>}
       </div>
       <div style={{ padding:"7px 14px", borderTop:"1px solid #0f172a", fontSize:9, color:"#1e293b", display:"flex", justifyContent:"space-between" }}>
-        <span>{taxon==="birds"?"AviList 2025":"MDD v2.4"} · iNaturalist CC0</span><span>IUCN Red List v4</span>
+        <span>{taxon==="birds"?"AviList 2025":taxon==="reptiles"?"Reptile Database 2026":"MDD v2.4"} · iNaturalist CC0</span><span>IUCN Red List v4</span>
       </div>
     </div>
   );
@@ -663,8 +673,8 @@ function SpeciesPanel({ sp, onClose, onSelectSsp, taxon }) {
 // ── Subspecies detail panel ────────────────────────────────────────────────
 function SubspeciesDetailPanel({ ssp, onClose, onOpenParent, taxon }) {
   const { name, parentSp } = ssp;
-  // Birds: ssp names are already full trinomials; mammals: need expansion from abbreviation
-  const fullName = taxon === "birds" ? name : expandSspName(name, parentSp.sci);
+  // Birds & reptiles: ssp names are already full trinomials; mammals: need expansion from abbreviation
+  const fullName = (taxon === "birds" || taxon === "reptiles") ? name : expandSspName(name, parentSp.sci);
   const { photos, loading, loadingMore, hasMore, loadMore } = useINat(fullName);
   const [tab, setTab] = useState("photos");
   const tabs = [["photos","📸","Photos"],["iucn","🛡","IUCN"]];
@@ -737,7 +747,7 @@ function SubspeciesDetailPanel({ ssp, onClose, onOpenParent, taxon }) {
       </div>
 
       <div style={{ padding:"7px 14px", borderTop:"1px solid #0f172a", fontSize:9, color:"#1e293b", display:"flex", justifyContent:"space-between" }}>
-        <span>{taxon==="birds"?"AviList 2025":"MDD v2.4"} subspecies</span><span>iNaturalist CC0</span>
+        <span>{taxon==="birds"?"AviList 2025":taxon==="reptiles"?"Reptile Database 2026":"MDD v2.4"} subspecies</span><span>iNaturalist CC0</span>
       </div>
     </div>
   );
@@ -997,6 +1007,16 @@ const TAXA = {
     subtitle: d => `AviList 2025 · ${d.toLocaleString()} species · iNaturalist CC0`,
     credits: [
       "AviList Core Team. 2025. AviList: The Global Avian Checklist, v2025. https://doi.org/10.2173/avilist.v2025",
+      "IUCN 2025. IUCN Red List of Threatened Species. Version 2025-2. www.iucnredlist.org"
+    ],
+    hasRealms: false,
+  },
+  reptiles: {
+    key: "reptiles", icon: "🦎", label: "Reptiles",
+    file: "/reptiles_full.json",
+    subtitle: d => `Reptile Database 2026 · ${d.toLocaleString()} species · iNaturalist CC0`,
+    credits: [
+      "Uetz, P., Freed, P., Aguilar, R., Reyes, F., Kudera, J. & Hošek, J. (eds.) (2026) The Reptile Database. http://www.reptile-database.org",
       "IUCN 2025. IUCN Red List of Threatened Species. Version 2025-2. www.iucnredlist.org"
     ],
     hasRealms: false,
