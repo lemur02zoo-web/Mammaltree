@@ -100,33 +100,57 @@ function useIUCN(sciName) {
 
 // Per-session cache for iNat taxon ID lookups
 const inatTaxonCache = {};
-const INAT_PAGE_SIZE = 6;
+// Fetch enough observations per page so that after CC0 filtering we reliably get 6 photos.
+// Each observation typically has 1-3 photos; requesting 24 gives a big buffer.
+const INAT_OBS_PER_PAGE = 24;
+const INAT_PHOTOS_PER_PAGE = 6;
 
 async function resolveInatTaxon(sciName) {
   if (sciName in inatTaxonCache) return inatTaxonCache[sciName];
   const isSsp = sciName.trim().split(" ").length >= 3;
   const rank = isSsp ? "subspecies" : "species";
-  const taxaData = await fetch(`https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(sciName)}&rank=${rank}&per_page=10`).then(r => r.json());
-  const exact = (taxaData.results || []).find(t => t.name.toLowerCase() === sciName.toLowerCase());
+  const taxaData = await fetch(
+    `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(sciName)}&rank=${rank}&per_page=10`
+  ).then(r => r.json());
+  const exact = (taxaData.results || []).find(
+    t => t.name.toLowerCase() === sciName.toLowerCase()
+  );
   const id = exact ? exact.id : null;
   inatTaxonCache[sciName] = id;
   return id;
 }
 
 function obsToImgs(results, sciName) {
-  const isSsp = sciName.trim().split(" ").length >= 3;
   const imgs = [];
   (results || []).forEach(obs => {
-    if (isSsp) {
-      const obsName = obs.taxon?.name || "";
-      if (obsName.toLowerCase() !== sciName.toLowerCase()) return;
-    }
+    // Always verify the observation's own taxon name matches exactly —
+    // this prevents related species bleeding through (e.g. Bubo virginianus
+    // appearing on the Bubo bubo page) whether querying species or subspecies.
+    const obsName = obs.taxon?.name || "";
+    if (obsName.toLowerCase() !== sciName.toLowerCase()) return;
     (obs.photos || []).forEach(ph => {
       if ((ph.license_code || "").toLowerCase() === "cc0")
-        imgs.push({ url: ph.url?.replace("square","medium"), thumb: ph.url, attr: ph.attribution || "", link: `https://www.inaturalist.org/observations/${obs.id}`, place: obs.place_guess || "" });
+        imgs.push({
+          url:   ph.url?.replace("square", "medium"),
+          thumb: ph.url,
+          attr:  ph.attribution || "",
+          link:  `https://www.inaturalist.org/observations/${obs.id}`,
+          place: obs.place_guess || "",
+          // quality_grade from parent obs — used for ordering
+          grade: obs.quality_grade === "research" ? 1 : 0,
+        });
     });
   });
   return imgs;
+}
+
+function buildObsUrl(sciName, taxonId, page) {
+  const isSsp = sciName.trim().split(" ").length >= 3;
+  const rankPin = (taxonId && isSsp) ? "&lrank=subspecies&hrank=subspecies" : "";
+  const base = taxonId
+    ? `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}${rankPin}`
+    : `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}`;
+  return `${base}&quality_grade=research&license=cc0&photos=true&per_page=${INAT_OBS_PER_PAGE}&page=${page}&order=votes&order_by=votes`;
 }
 
 function useINat(sciName) {
@@ -134,27 +158,31 @@ function useINat(sciName) {
   const [loading, setLoading]         = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore]         = useState(false);
-  const [page, setPage]               = useState(1);
-  const taxonIdRef                    = useRef(null);
+  // We track which obs page we've fetched up to, and how many photos we've shown
+  const stateRef = useRef({ obsPage: 1, totalObs: 0, taxonId: null, buffer: [] });
 
   useEffect(() => {
     if (!sciName) return;
     let cancelled = false;
-    setPhotos([]); setPage(1); setHasMore(false); setLoading(true);
-    const isSsp = sciName.trim().split(" ").length >= 3;
+    setPhotos([]); setHasMore(false); setLoading(true);
+    stateRef.current = { obsPage: 1, totalObs: 0, taxonId: null, buffer: [] };
     (async () => {
       try {
         const taxonId = await resolveInatTaxon(sciName);
         if (cancelled) return;
-        taxonIdRef.current = taxonId;
-        const rankPin = (taxonId && isSsp) ? "&lrank=subspecies&hrank=subspecies" : "";
-        const base = taxonId
-          ? `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}${rankPin}`
-          : `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}`;
-        const data = await fetch(`${base}&quality_grade=research&license=cc0&photos=true&per_page=${INAT_PAGE_SIZE}&page=1&order=votes&order_by=votes`).then(r => r.json());
+        stateRef.current.taxonId = taxonId;
+        const data = await fetch(buildObsUrl(sciName, taxonId, 1)).then(r => r.json());
         if (cancelled) return;
-        setPhotos(obsToImgs(data.results, sciName));
-        setHasMore((data.total_results || 0) > INAT_PAGE_SIZE);
+        const imgs = obsToImgs(data.results, sciName);
+        stateRef.current.totalObs = data.total_results || 0;
+        stateRef.current.buffer = imgs;
+        const show = imgs.slice(0, INAT_PHOTOS_PER_PAGE);
+        const remaining = imgs.slice(INAT_PHOTOS_PER_PAGE);
+        stateRef.current.buffer = remaining;
+        const moreInBuffer = remaining.length > 0;
+        const moreOnServer = stateRef.current.totalObs > INAT_OBS_PER_PAGE;
+        setPhotos(show);
+        setHasMore(moreInBuffer || moreOnServer);
         setLoading(false);
       } catch { if (!cancelled) setLoading(false); }
     })();
@@ -164,21 +192,32 @@ function useINat(sciName) {
   const loadMore = useCallback(async () => {
     if (loadingMore || !sciName) return;
     setLoadingMore(true);
-    const nextPage = page + 1;
-    const isSsp = sciName.trim().split(" ").length >= 3;
-    const taxonId = taxonIdRef.current;
-    const rankPin = (taxonId && isSsp) ? "&lrank=subspecies&hrank=subspecies" : "";
-    const base = taxonId
-      ? `https://api.inaturalist.org/v1/observations?taxon_id=${taxonId}${rankPin}`
-      : `https://api.inaturalist.org/v1/observations?taxon_name=${encodeURIComponent(sciName)}`;
+    const s = stateRef.current;
     try {
-      const data = await fetch(`${base}&quality_grade=research&license=cc0&photos=true&per_page=${INAT_PAGE_SIZE}&page=${nextPage}&order=votes&order_by=votes`).then(r => r.json());
-      setPhotos(prev => [...prev, ...obsToImgs(data.results, sciName)]);
-      setPage(nextPage);
-      setHasMore((data.total_results || 0) > nextPage * INAT_PAGE_SIZE);
+      // First drain the buffer from previously fetched observations
+      if (s.buffer.length >= INAT_PHOTOS_PER_PAGE) {
+        const show = s.buffer.slice(0, INAT_PHOTOS_PER_PAGE);
+        s.buffer = s.buffer.slice(INAT_PHOTOS_PER_PAGE);
+        setPhotos(prev => [...prev, ...show]);
+        setHasMore(s.buffer.length > 0 || s.totalObs > s.obsPage * INAT_OBS_PER_PAGE);
+      } else {
+        // Need to fetch the next obs page
+        const nextPage = s.obsPage + 1;
+        if (nextPage * INAT_OBS_PER_PAGE - INAT_OBS_PER_PAGE >= s.totalObs && s.buffer.length === 0) {
+          setHasMore(false);
+        } else {
+          const data = await fetch(buildObsUrl(sciName, s.taxonId, nextPage)).then(r => r.json());
+          s.obsPage = nextPage;
+          const newImgs = [...s.buffer, ...obsToImgs(data.results, sciName)];
+          const show = newImgs.slice(0, INAT_PHOTOS_PER_PAGE);
+          s.buffer = newImgs.slice(INAT_PHOTOS_PER_PAGE);
+          setPhotos(prev => [...prev, ...show]);
+          setHasMore(s.buffer.length > 0 || s.totalObs > nextPage * INAT_OBS_PER_PAGE);
+        }
+      }
     } catch {}
     setLoadingMore(false);
-  }, [sciName, page, loadingMore]);
+  }, [sciName, loadingMore]);
 
   return { photos, loading, loadingMore, hasMore, loadMore };
 }
