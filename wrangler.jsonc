@@ -2,8 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "mammaltree",
   "compatibility_date": "2025-09-27",
+  "observability": {
+    "enabled": true
+  },
   "assets": {
-    "directory": "public",
-    "not_found_handling": "single-page-application"
-  }
+    "directory": "public"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
 }
