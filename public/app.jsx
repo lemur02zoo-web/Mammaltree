@@ -158,23 +158,41 @@ function obsToImgs(results, sciName) {
     } else {
       if (obsName !== nameLower && !obsName.startsWith(nameLower + " ")) return;
     }
+    // Skip captive/zoo observations — less representative of the wild taxon
+    if (obs.captive) return;
+
     const faves = obs.faves_count || 0;
     (obs.photos || []).forEach((ph, phIdx) => {
-      if ((ph.license_code || "").toLowerCase() === "cc0")
-        imgs.push({
-          url:   ph.url?.replace("square", "medium"),
-          thumb: ph.url,
-          attr:  ph.attribution || "",
-          link:  `https://www.inaturalist.org/observations/${obs.id}`,
-          place: obs.place_guess || "",
-          score: faves - phIdx * 0.1,
-        });
+      if ((ph.license_code || "").toLowerCase() !== "cc0") return;
+
+      // original_dimensions is in the photo object and gives actual upload resolution.
+      // Higher pixel count strongly correlates with a deliberate, quality photo.
+      // iNat caps originals at 2048px so max ~4MP.
+      const dims = ph.original_dimensions;
+      const mpx  = dims ? (dims.width * dims.height) / 1_000_000 : 0;
+
+      // Prefer non-square aspect ratios — square crops are often casual snaps,
+      // while landscape/portrait frames suggest a deliberate field photograph.
+      const ar       = dims ? Math.max(dims.width, dims.height) / Math.min(dims.width, dims.height) : 1;
+      const arBonus  = ar > 1.15 ? 1 : 0;
+
+      // Score: resolution dominates, faves adds signal, small penalties for
+      // non-lead photos and missing dimensions.
+      const score = mpx * 2 + faves * 0.5 + arBonus - phIdx * 0.2 + (dims ? 0 : -1);
+
+      imgs.push({
+        url:   ph.url?.replace("square", "medium"),
+        thumb: ph.url,
+        attr:  ph.attribution || "",
+        link:  `https://www.inaturalist.org/observations/${obs.id}`,
+        place: obs.place_guess || "",
+        score,
+      });
     });
   });
   imgs.sort((a, b) => b.score - a.score);
   return imgs;
 }
-
 
 
 function useINat(sciName) {
